@@ -44,17 +44,6 @@
             <p class="text-gray-400 mt-2">A web interface to configure your ESP32-POE device.</p>
         </header>
 
-        <div class="bg-gray-800 p-6 rounded-lg shadow-lg mb-8">
-            <h2 class="text-xl font-semibold mb-4 text-white">1. Connect to Device</h2>
-            <div class="flex flex-col sm:flex-row items-center gap-4">
-                <input type="text" id="deviceIp" placeholder="Enter Device IP Address (e.g., 192.168.1.166)" class="w-full flex-grow bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                <button id="fetchDataBtn" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center">
-                    <span id="fetchBtnText">Fetch Data</span>
-                    <div id="fetchSpinner" class="spinner hidden ml-2"></div>
-                </button>
-            </div>
-        </div>
-
         <div id="navTabs" class="hidden mb-8 flex flex-wrap items-center justify-center gap-2 bg-gray-800 p-2 rounded-lg">
             <button class="tab-button active py-2 px-4 rounded-md text-sm font-medium" data-target="deviceInfoSection">Device Info</button>
             <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="i2cMappingSection">I2C Mapping</button>
@@ -188,9 +177,6 @@
 
     <script>
         // Get references to all the important HTML elements
-        const deviceIpInput = document.getElementById('deviceIp');
-        const fetchDataBtn = document.getElementById('fetchDataBtn');
-        const fetchBtnText = document.getElementById('fetchBtnText');
         const fetchSpinner = document.getElementById('fetchSpinner');
         const navTabs = document.getElementById('navTabs');
         const mainContent = document.getElementById('mainContent');
@@ -240,10 +226,6 @@
         const restartSpinner = document.getElementById('restartSpinner');
 
         // --- Event Listeners ---
-        
-        // Fetch data when the button is clicked
-        fetchDataBtn.addEventListener('click', fetchData);
-
         // Save all configs when the button is clicked
         saveAllBtn.addEventListener('click', saveAllConfigs);
 
@@ -295,16 +277,8 @@
          * Fetches adoption and configuration data from the device
          */
         async function fetchData() {
-            const ip = deviceIpInput.value.trim();
-            if (!ip) {
-                showStatus('Please enter a valid IP address.', 'error');
-                return;
-            }
+            console.log("fetchData() called"); 
 
-            // Store IP for later use
-            localStorage.setItem('oxrsDeviceIp', ip);
-
-            setLoadingState(fetchDataBtn, fetchBtnText, fetchSpinner, true);
             showStatus('Connecting to device...', 'loading');
             mainContent.classList.add('hidden');
             navTabs.classList.add('hidden');
@@ -312,9 +286,9 @@
             try {
                 // Fetch all data points simultaneously
                 const [adoptResponse, configResponse, mqttResponse] = await Promise.all([
-                    fetch(`http://${ip}/api/adopt`),
-                    fetch(`http://${ip}/api/config`),
-                    fetch(`http://${ip}/api/mqtt`)
+                    fetch(`/api/adopt`),
+                    fetch(`/api/config`),
+                    fetch(`/api/mqtt`)
                 ]);
 
                 if (!adoptResponse.ok || !configResponse.ok || !mqttResponse.ok) {
@@ -336,8 +310,6 @@
             } catch (error) {
                 console.error('Fetch error:', error);
                 showStatus(`Failed to connect to device at ${ip}. Check the IP and connection.`, 'error');
-            } finally {
-                setLoadingState(fetchDataBtn, fetchBtnText, fetchSpinner, false);
             }
         }
 
@@ -494,12 +466,6 @@
          * Gathers all configurations from the UI and saves them to the device
          */
         async function saveAllConfigs() {
-            const ip = deviceIpInput.value.trim();
-            if (!ip) {
-                showStatus('Cannot save. No device IP specified.', 'error');
-                return;
-            }
-
             const mqttConfig = {
                 broker: mqttBroker.value.trim(),
                 port: parseInt(mqttPort.value, 10) || 1883,
@@ -520,12 +486,12 @@
             try {
                 // Save MQTT and other configs in parallel
                 const [mqttResponse, configResponse] = await Promise.all([
-                    fetch(`http://${ip}/api/mqtt`, {
+                    fetch(`/api/mqtt`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(mqttConfig)
                     }),
-                    fetch(`http://${ip}/api/config`, {
+                    fetch(`/api/config`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(otherConfig)
@@ -586,12 +552,6 @@
          * Sends a command to control an output or group
          */
         async function sendCommand() {
-            const ip = deviceIpInput.value.trim();
-            if (!ip) {
-                showStatus('Cannot send command. No device IP specified.', 'error');
-                return;
-            }
-
             const target = commandTargetInput.value.trim();
             const value = commandValueInput.value.trim();
             const fadeValue = fadeInput.value.trim();
@@ -626,7 +586,7 @@
             showStatus(`Sending command to ${target}...`, 'loading');
 
             try {
-                const response = await fetch(`http://${ip}/api/command`, {
+                const response = await fetch(`/api/command`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(command)
@@ -665,7 +625,7 @@
             showStatus(`Uploading ${file.name}...`, 'loading');
 
             try {
-                const response = await fetch(`http://${ip}/api/ota`, {
+                const response = await fetch(`/api/ota`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/octet-stream' },
                     body: file
@@ -700,7 +660,7 @@
 
             try {
                 // CORRECTED URL: Added /api/ prefix
-                const response = await fetch(`http://${ip}/api/command`, {
+                const response = await fetch(`/api/command`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(command)
@@ -757,12 +717,11 @@
                 spinnerEl.classList.add('hidden');
             }
         }
-
-        // On page load, try to get the last used IP from local storage
-        const savedIp = localStorage.getItem('oxrsDeviceIp');
-        if (savedIp) {
-            deviceIpInput.value = savedIp;
-        }
+        // Run automatically on load
+        window.onload = () => {
+            console.log("Page loaded, calling fetchData()");
+            fetchData();
+        };
     </script>
 </body>
 </html>
