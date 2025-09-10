@@ -1,19 +1,19 @@
 # General OS and editor files
-.DS_Store
-*~
-*.swp
-.history/
-
-# PlatformIO
-.pio/
-.sconsign.py
-
-# VSCode
-.vscode/
-
+# Build artifacts
 /build/
-/sdkconfig.old
-*.log
-*.bin
+sdkconfig.old
+sdkconfig.defaults.old
+
+# IDE / editor files
+.vscode/
+*.code-workspace
+
+# Compiled binaries
 *.elf
+*.bin
 *.map
+*.d
+
+# Python cache
+__pycache__/
+*.pyc

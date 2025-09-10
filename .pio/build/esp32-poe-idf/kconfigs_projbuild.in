@@ -1,0 +1,5 @@
+source "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/app_update/Kconfig.projbuild"
+source "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/bootloader/Kconfig.projbuild"
+source "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_rom/Kconfig.projbuild"
+source "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esptool_py/Kconfig.projbuild"
+source "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/partition_table/Kconfig.projbuild"

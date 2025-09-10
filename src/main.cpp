@@ -420,18 +420,16 @@ extern "C" void app_main(void) {
         // TODO: look up group -> outputs in stored JSON (HSG::API::get_config_json()) and set each
     };
 
+    ESP_ERROR_CHECK(HSG::API::start(api_init));
+    
     // Register all API URIs on the existing server
     //ESP_ERROR_CHECK(HSG::API::register_uris(server, api_init));
     //------------------------------------------------------------------------------------------
 
     // 2) Bring up HTTP after at least one IP is available
-    httpd_handle_t server = web_start();
-    if (server) {
-        ESP_ERROR_CHECK(HSG::API::register_uris(server, api_init));
-    } else {
-        ESP_LOGE(TAG, "HTTP server failed to start, API not registered");
-    }
-
+ //   httpd_handle_t server = web_start();
+ 
+    
     // 3) I2C ready
     ESP_ERROR_CHECK(i2c_master_init());
     ESP_LOGI(TAG, "I2C ready: SDA=%d SCL=%d @%dHz",

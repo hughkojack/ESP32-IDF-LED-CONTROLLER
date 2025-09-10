@@ -18,6 +18,9 @@ static const char* TAG = "HSG-API";
 static const char* NVS_NS = "cfg";
 static const char* NVS_KEY_CONFIG = "app_cfg";
 
+extern const char _binary_ESP32_POE_html_start[] asm("_binary_ESP32_POE_html_start");
+extern const char _binary_ESP32_POE_html_end[]   asm("_binary_ESP32_POE_html_end");
+
 namespace {
 
 httpd_handle_t g_http = nullptr;
@@ -281,27 +284,13 @@ static esp_err_t h_ota(httpd_req_t* req) {
     return ESP_OK;
 }
 
-// Register all URIs
-static esp_err_t register_uris() {
-    httpd_uri_t adopt_get  { .uri="/api/adopt",   .method=HTTP_GET,  .handler=h_adopt };
-    httpd_uri_t config_get { .uri="/api/config",  .method=HTTP_GET,  .handler=h_config_get };
-    httpd_uri_t config_post{ .uri="/api/config",  .method=HTTP_POST, .handler=h_config_post };
-    httpd_uri_t mqtt_get   { .uri="/api/mqtt",    .method=HTTP_GET,  .handler=h_mqtt_get };
-    httpd_uri_t mqtt_post  { .uri="/api/mqtt",    .method=HTTP_POST, .handler=h_mqtt_post };
-    httpd_uri_t cmd_post   { .uri="/api/command", .method=HTTP_POST, .handler=h_command };
-    httpd_uri_t can_last   { .uri="/api/can/last",.method=HTTP_GET,  .handler=h_can_last };
-    httpd_uri_t ota_post   { .uri="/api/ota",     .method=HTTP_POST, .handler=h_ota };
-
-    httpd_register_uri_handler(g_http, &adopt_get);
-    httpd_register_uri_handler(g_http, &config_get);
-    httpd_register_uri_handler(g_http, &config_post);
-    httpd_register_uri_handler(g_http, &mqtt_get);
-    httpd_register_uri_handler(g_http, &mqtt_post);
-    httpd_register_uri_handler(g_http, &cmd_post);
-    httpd_register_uri_handler(g_http, &can_last);
-    httpd_register_uri_handler(g_http, &ota_post);
+static esp_err_t h_root(httpd_req_t* req) {
+    size_t len = _binary_ESP32_POE_html_end - _binary_ESP32_POE_html_start;
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, _binary_ESP32_POE_html_start, len);
     return ESP_OK;
 }
+
 
 } // namespace (anon)
 
@@ -315,6 +304,16 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
         return ESP_ERR_INVALID_ARG;
     }
     g_init = init; // keep callbacks
+
+    // existing URIs...
+    httpd_uri_t root = {
+        .uri       = "/",
+        .method    = HTTP_GET,
+        .handler   = h_root,
+        .user_ctx  = nullptr
+    };
+
+    httpd_register_uri_handler(server, &root);
 
     // Define all URI handlers
     httpd_uri_t adopt_get  { .uri="/api/adopt",   .method=HTTP_GET,  .handler=h_adopt,     .user_ctx=nullptr };
@@ -350,16 +349,20 @@ esp_err_t start(const Init& cfg) {
         if (r == ESP_OK) nvs_flash_init();
     }
 
-    if (g_http) return ESP_OK; // already started
+//    if (g_http) return ESP_OK; // already started
 
     httpd_config_t conf = HTTPD_DEFAULT_CONFIG();
+    conf.max_uri_handlers = 16;   // allow more routes
+    conf.lru_purge_enable = true; // optional: allows reusing slots if needed
     conf.server_port = 80;
-    auto err = httpd_start(&g_http, &conf);
+
+    httpd_handle_t server = nullptr;
+    auto err = httpd_start(&server, &conf);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "HTTP start failed: %s", esp_err_to_name(err));
         return err;
     }
-    ESP_ERROR_CHECK(register_uris(g_http, cfg));
+    ESP_ERROR_CHECK(register_uris(server, cfg));
     ESP_LOGI(TAG, "HTTP API ready on :%d", conf.server_port);
     return ESP_OK;
 }

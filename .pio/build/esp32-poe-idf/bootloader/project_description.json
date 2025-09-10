@@ -1,0 +1,23 @@
+{
+    "project_name":       "bootloader",
+    "project_path":       "C:/Users/Hugh/.platformio/packages/framework-espidf/components/bootloader/subproject",
+    "build_dir":          "C:/Dev/LED-Controller/.pio/build/esp32-poe-idf/bootloader",
+    "config_file":        "C:/Dev/LED-Controller/sdkconfig.esp32-poe-idf",
+    "config_defaults":    "",
+    "app_elf":            "bootloader.elf",
+    "app_bin":            "bootloader.bin",
+    "git_revision":       "4.4.5",
+    "target":             "esp32",
+    "rev":                "0",
+    "min_rev":            "0",
+    "max_rev":            "399",
+    "phy_data_partition": "",
+    "monitor_baud" :      "115200",
+    "monitor_toolprefix": "xtensa-esp32-elf-",
+    "config_environment" : {
+        "COMPONENT_KCONFIGS" : "C:/Users/Hugh/.platformio/packages/framework-espidf/components/efuse/Kconfig;C:/Users/Hugh/.platformio/packages/framework-espidf/components/esp32/Kconfig;C:/Users/Hugh/.platformio/packages/framework-espidf/components/esp_common/Kconfig;C:/Users/Hugh/.platformio/packages/framework-espidf/components/esp_hw_support/Kconfig;C:/Users/Hugh/.platformio/packages/framework-espidf/components/esp_system/Kconfig;C:/Users/Hugh/.platformio/packages/framework-espidf/components/freertos/Kconfig;C:/Users/Hugh/.platformio/packages/framework-espidf/components/hal/Kconfig;C:/Users/Hugh/.platformio/packages/framework-espidf/components/log/Kconfig;C:/Users/Hugh/.platformio/packages/framework-espidf/components/newlib/Kconfig;C:/Users/Hugh/.platformio/packages/framework-espidf/components/spi_flash/Kconfig",
+        "COMPONENT_KCONFIGS_PROJBUILD" : "C:/Users/Hugh/.platformio/packages/framework-espidf/components/bootloader/Kconfig.projbuild;C:/Users/Hugh/.platformio/packages/framework-espidf/components/esp_rom/Kconfig.projbuild;C:/Users/Hugh/.platformio/packages/framework-espidf/components/esptool_py/Kconfig.projbuild;C:/Users/Hugh/.platformio/packages/framework-espidf/components/partition_table/Kconfig.projbuild"
+    },
+    "build_components" : [ "bootloader", "bootloader_support", "efuse", "esp32", "esp_common", "esp_hw_support", "esp_rom", "esp_system", "esptool_py", "freertos", "hal", "log", "main", "micro-ecc", "newlib", "partition_table", "soc", "spi_flash", "xtensa", "" ],
+    "build_component_paths" : [ "C:/Users/Hugh/.platformio/packages/framework-espidf/components/bootloader", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/bootloader_support", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/efuse", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/esp32", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/esp_common", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/esp_hw_support", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/esp_rom", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/esp_system", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/esptool_py", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/freertos", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/hal", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/log", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/bootloader/subproject/main", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/bootloader/subproject/components/micro-ecc", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/newlib", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/partition_table", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/soc", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/spi_flash", "C:/Users/Hugh/.platformio/packages/framework-espidf/components/xtensa", "" ]
+}

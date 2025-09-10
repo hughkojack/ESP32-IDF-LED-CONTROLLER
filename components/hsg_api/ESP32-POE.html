@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HSG Light Controller</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Simple spinner animation */
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, .1);
+            border-left-color: #4f46e5;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .tab-button {
+            transition: background-color 0.3s, color 0.3s;
+        }
+        .tab-button.active {
+            background-color: #4f46e5;
+            color: #ffffff;
+        }
+        .group-output-label {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            cursor: pointer;
+        }
+        .group-output-checkbox {
+            transform: scale(1.2);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200 font-sans antialiased">
+
+    <div class="container mx-auto p-4 md:p-8 max-w-4xl">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-white">HSG Light Controller</h1>
+            <p class="text-gray-400 mt-2">A web interface to configure your ESP32-POE device.</p>
+        </header>
+
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg mb-8">
+            <h2 class="text-xl font-semibold mb-4 text-white">1. Connect to Device</h2>
+            <div class="flex flex-col sm:flex-row items-center gap-4">
+                <input type="text" id="deviceIp" placeholder="Enter Device IP Address (e.g., 192.168.1.166)" class="w-full flex-grow bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <button id="fetchDataBtn" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center">
+                    <span id="fetchBtnText">Fetch Data</span>
+                    <div id="fetchSpinner" class="spinner hidden ml-2"></div>
+                </button>
+            </div>
+        </div>
+
+        <div id="navTabs" class="hidden mb-8 flex flex-wrap items-center justify-center gap-2 bg-gray-800 p-2 rounded-lg">
+            <button class="tab-button active py-2 px-4 rounded-md text-sm font-medium" data-target="deviceInfoSection">Device Info</button>
+            <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="i2cMappingSection">I2C Mapping</button>
+            <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="groupConfigSection">Groups</button>
+            <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="mqttConfigSection">MQTT Config</button>
+            <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="commandSection">Command</button>
+            <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="advancedSection">Advanced</button>
+        </div>
+
+        <main id="mainContent" class="hidden space-y-8">
+            
+            <div id="deviceInfoSection" class="config-section bg-gray-800 p-6 rounded-lg shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">Device Information</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+                    <div>
+                        <h3 class="font-bold text-indigo-400 mb-2">Firmware</h3>
+                        <p><strong>Name:</strong> <span id="fwName">-</span></p>
+                        <p><strong>Version:</strong> <span id="fwVersion">-</span></p>
+                        <p><strong>Maker:</strong> <span id="fwMaker">-</span></p>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-indigo-400 mb-2">Network</h3>
+                        <p><strong>Mode:</strong> <span id="netMode">-</span></p>
+                        <p><strong>IP Address:</strong> <span id="netIp">-</span></p>
+                        <p><strong>MAC Address:</strong> <span id="netMac">-</span></p>
+                    </div>
+                    <div class="md:col-span-2">
+                        <h3 class="font-bold text-indigo-400 mb-2">System</h3>
+                        <p><strong>Free Heap:</strong> <span id="sysHeap">-</span> bytes</p>
+                        <p><strong>Sketch Size:</strong> <span id="sysSketch">-</span> bytes</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="i2cMappingSection" class="config-section hidden bg-gray-800 p-6 rounded-lg shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">I2C Device Mapping</h2>
+                <div id="i2cMapping" class="text-sm space-y-6">
+                    <p class="text-gray-400">No PCA9685 devices detected.</p>
+                </div>
+            </div>
+
+            <div id="groupConfigSection" class="config-section hidden bg-gray-800 p-6 rounded-lg shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">Group Definitions</h2>
+                <div id="groupContainer" class="space-y-4"></div>
+                <button id="addGroupBtn" class="mt-4 text-sm bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md transition duration-300">Add Group</button>
+            </div>
+
+            <div id="mqttConfigSection" class="config-section hidden bg-gray-800 p-6 rounded-lg shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">MQTT Configuration</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label for="mqttBroker" class="block text-sm font-medium text-gray-300">Broker</label>
+                        <input type="text" id="mqttBroker" placeholder="MQTT Broker IP or Hostname" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div>
+                        <label for="mqttPort" class="block text-sm font-medium text-gray-300">Port</label>
+                        <input type="number" id="mqttPort" placeholder="1883" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div>
+                        <label for="mqttTopicPrefix" class="block text-sm font-medium text-gray-300">Topic Prefix</label>
+                        <input type="text" id="mqttTopicPrefix" placeholder="e.g., oxrs/" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div>
+                        <label for="mqttClientId" class="block text-sm font-medium text-gray-300">Client ID</label>
+                        <input type="text" id="mqttClientId" placeholder="Client ID (e.g., esp32-led)" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div>
+                        <label for="mqttUsername" class="block text-sm font-medium text-gray-300">Username (Optional)</label>
+                        <input type="text" id="mqttUsername" placeholder="Username" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div>
+                        <label for="mqttPassword" class="block text-sm font-medium text-gray-300">Password (Optional)</label>
+                        <input type="password" id="mqttPassword" placeholder="Password" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <button id="saveAllBtn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center">
+                        <span id="saveAllBtnText">Save All Configurations</span>
+                        <div id="saveAllSpinner" class="spinner hidden ml-2"></div>
+                    </button>
+                </div>
+            </div>
+
+            <div id="commandSection" class="config-section hidden bg-gray-800 p-6 rounded-lg shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">Send Command</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label for="commandTargetInput" class="block text-sm font-medium text-gray-300">Output/Group</label>
+                        <input type="text" id="commandTargetInput" placeholder="e.g., 1 or 'lights'" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div>
+                        <label for="commandValueInput" class="block text-sm font-medium text-gray-300">Value</label>
+                        <input type="text" id="commandValueInput" placeholder="e.g., ON, OFF, 50" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div>
+                        <label for="fadeInput" class="block text-sm font-medium text-gray-300">Fade Delay (ms)</label>
+                        <input type="number" id="fadeInput" placeholder="e.g., 500" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <button id="sendCommandBtn" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center">
+                        <span id="sendCommandBtnText">Send Command</span>
+                        <div id="sendCommandSpinner" class="spinner hidden ml-2"></div>
+                    </button>
+                </div>
+            </div>
+
+            <div id="advancedSection" class="config-section hidden space-y-8">
+                <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                    <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">Firmware Update (OTA)</h2>
+                    <div class="space-y-4">
+                        <div>
+                            <label for="otaFile" class="block text-sm font-medium text-gray-300">Select Firmware File (.bin)</label>
+                            <input type="file" id="otaFile" accept=".bin" class="mt-1 w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700">
+                        </div>
+                        <button id="uploadFwBtn" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center">
+                            <span id="uploadBtnText">Upload Firmware</span>
+                            <div id="uploadSpinner" class="spinner hidden ml-2"></div>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                    <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">Device Actions</h2>
+                    <button id="restartBtn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center">
+                        <span id="restartBtnText">Restart Device</span>
+                        <div id="restartSpinner" class="spinner hidden ml-2"></div>
+                    </button>
+                </div>
+            </div>
+        </main>
+        
+        <div id="statusMessage" class="mt-8 text-center text-sm"></div>
+    </div>
+
+    <script>
+        // Get references to all the important HTML elements
+        const deviceIpInput = document.getElementById('deviceIp');
+        const fetchDataBtn = document.getElementById('fetchDataBtn');
+        const fetchBtnText = document.getElementById('fetchBtnText');
+        const fetchSpinner = document.getElementById('fetchSpinner');
+        const navTabs = document.getElementById('navTabs');
+        const mainContent = document.getElementById('mainContent');
+        const statusMessage = document.getElementById('statusMessage');
+
+        // Display elements
+        const fwName = document.getElementById('fwName');
+        const fwVersion = document.getElementById('fwVersion');
+        const fwMaker = document.getElementById('fwMaker');
+        const netMode = document.getElementById('netMode');
+        const netIp = document.getElementById('netIp');
+        const netMac = document.getElementById('netMac');
+        const sysHeap = document.getElementById('sysHeap');
+        const sysSketch = document.getElementById('sysSketch');
+        const i2cMapping = document.getElementById('i2cMapping');
+        const groupContainer = document.getElementById('groupContainer');
+        const addGroupBtn = document.getElementById('addGroupBtn');
+
+        // MQTT input elements
+        const mqttBroker = document.getElementById('mqttBroker');
+        const mqttPort = document.getElementById('mqttPort');
+        const mqttTopicPrefix = document.getElementById('mqttTopicPrefix');
+        const mqttClientId = document.getElementById('mqttClientId');
+        const mqttUsername = document.getElementById('mqttUsername');
+        const mqttPassword = document.getElementById('mqttPassword');
+        const saveAllBtn = document.getElementById('saveAllBtn');
+        const saveAllBtnText = document.getElementById('saveAllBtnText');
+        const saveAllSpinner = document.getElementById('saveAllSpinner');
+
+        // Command elements
+        const commandTargetInput = document.getElementById('commandTargetInput');
+        const commandValueInput = document.getElementById('commandValueInput');
+        const fadeInput = document.getElementById('fadeInput');
+        const sendCommandBtn = document.getElementById('sendCommandBtn');
+        const sendCommandBtnText = document.getElementById('sendCommandBtnText');
+        const sendCommandSpinner = document.getElementById('sendCommandSpinner');
+
+        // OTA elements
+        const otaFile = document.getElementById('otaFile');
+        const uploadFwBtn = document.getElementById('uploadFwBtn');
+        const uploadBtnText = document.getElementById('uploadBtnText');
+        const uploadSpinner = document.getElementById('uploadSpinner');
+
+        // Action elements
+        const restartBtn = document.getElementById('restartBtn');
+        const restartBtnText = document.getElementById('restartBtnText');
+        const restartSpinner = document.getElementById('restartSpinner');
+
+        // --- Event Listeners ---
+        
+        // Fetch data when the button is clicked
+        fetchDataBtn.addEventListener('click', fetchData);
+
+        // Save all configs when the button is clicked
+        saveAllBtn.addEventListener('click', saveAllConfigs);
+
+        // Add group when button is clicked
+        addGroupBtn.addEventListener('click', () => addGroup());
+        
+        // Send command when the button is clicked
+        sendCommandBtn.addEventListener('click', sendCommand);
+
+        // Upload firmware when the button is clicked
+        uploadFwBtn.addEventListener('click', uploadFirmware);
+
+        // Restart device when the button is clicked
+        restartBtn.addEventListener('click', restartDevice);
+        
+        // Handle tab clicks
+        navTabs.addEventListener('click', (event) => {
+            if (event.target.classList.contains('tab-button')) {
+                handleTabClick(event.target);
+            }
+        });
+
+
+        // --- Functions ---
+
+        /**
+         * Handles clicking on a navigation tab
+         * @param {HTMLElement} clickedTab - The tab that was clicked
+         */
+        function handleTabClick(clickedTab) {
+            // Update active state for buttons
+            navTabs.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            clickedTab.classList.add('active');
+
+            // Show/hide content sections
+            const targetId = clickedTab.dataset.target;
+            mainContent.querySelectorAll('.config-section').forEach(section => {
+                if (section.id === targetId) {
+                    section.classList.remove('hidden');
+                } else {
+                    section.classList.add('hidden');
+                }
+            });
+        }
+
+        /**
+         * Fetches adoption and configuration data from the device
+         */
+        async function fetchData() {
+            const ip = deviceIpInput.value.trim();
+            if (!ip) {
+                showStatus('Please enter a valid IP address.', 'error');
+                return;
+            }
+
+            // Store IP for later use
+            localStorage.setItem('oxrsDeviceIp', ip);
+
+            setLoadingState(fetchDataBtn, fetchBtnText, fetchSpinner, true);
+            showStatus('Connecting to device...', 'loading');
+            mainContent.classList.add('hidden');
+            navTabs.classList.add('hidden');
+
+            try {
+                // Fetch all data points simultaneously
+                const [adoptResponse, configResponse, mqttResponse] = await Promise.all([
+                    fetch(`http://${ip}/api/adopt`),
+                    fetch(`http://${ip}/api/config`),
+                    fetch(`http://${ip}/api/mqtt`)
+                ]);
+
+                if (!adoptResponse.ok || !configResponse.ok || !mqttResponse.ok) {
+                    throw new Error(`HTTP error! Failed to fetch data.`);
+                }
+
+                const adoptData = await adoptResponse.json();
+                const configData = await configResponse.json();
+                const mqttData = await mqttResponse.json();
+
+                // Merge the results, giving precedence to more specific configs
+                const combinedData = { ...adoptData, config: { ...configData, ...mqttData } };
+
+                populateUI(combinedData);
+                showStatus('Successfully connected to device.', 'success');
+                mainContent.classList.remove('hidden');
+                navTabs.classList.remove('hidden');
+                handleTabClick(navTabs.querySelector('.tab-button.active')); // Show default tab
+            } catch (error) {
+                console.error('Fetch error:', error);
+                showStatus(`Failed to connect to device at ${ip}. Check the IP and connection.`, 'error');
+            } finally {
+                setLoadingState(fetchDataBtn, fetchBtnText, fetchSpinner, false);
+            }
+        }
+
+        /**
+         * Populates the UI with data fetched from the device
+         * @param {object} data - The JSON data from the /adopt endpoint
+         */
+        function populateUI(data) {
+            // Firmware Info
+            fwName.textContent = data.firmware?.name || '-';
+            fwVersion.textContent = data.firmware?.version || 'N/A';
+            fwMaker.textContent = data.firmware?.maker || '-';
+
+            // Network Info
+            netMode.textContent = data.network?.mode || '-';
+            netIp.textContent = data.network?.ip || '-';
+            netMac.textContent = data.network?.mac || '-';
+
+            // System Info
+            sysHeap.textContent = data.system?.heapFreeBytes || '-';
+            sysSketch.textContent = data.system?.sketchSpaceUsedBytes || '-';
+
+            // I2C Mapping
+            i2cMapping.innerHTML = ''; // Clear previous content
+            if (data.i2c && data.i2c.pca9685 && data.i2c.pca9685.length > 0) {
+                data.i2c.pca9685.forEach(addr => {
+                    const deviceContainer = document.createElement('div');
+                    const hexAddr = `0x${addr.toString(16)}`;
+                    deviceContainer.innerHTML = `<h3 class="font-bold text-indigo-400 mb-2">PCA9685 at ${hexAddr}</h3>`;
+                    
+                    const grid = document.createElement('div');
+                    grid.className = 'grid grid-cols-4 md:grid-cols-8 gap-2';
+
+                    for (let i = 0; i < 16; i++) {
+                        const inputContainer = document.createElement('div');
+                        inputContainer.className = 'flex items-center';
+                        inputContainer.innerHTML = `
+                            <label for="pca-${addr}-${i}" class="text-xs mr-2">${i}:</label>
+                            <input type="number" id="pca-${addr}-${i}" data-addr="${addr}" data-port="${i}" 
+                                   class="w-full bg-gray-700 text-white rounded-md px-2 py-1 text-xs border border-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                        `;
+                        grid.appendChild(inputContainer);
+                    }
+                    deviceContainer.appendChild(grid);
+                    i2cMapping.appendChild(deviceContainer);
+                });
+            } else {
+                i2cMapping.innerHTML = '<p class="text-gray-400">No PCA9685 devices detected.</p>';
+            }
+
+            // MQTT, I2C, and Group Config (if available in the response)
+            if (data.config) {
+                mqttBroker.value = data.config.broker || '';
+                mqttPort.value = data.config.port || '';
+                mqttTopicPrefix.value = data.config.topicPrefix || 'oxrs/';
+                
+                // If a clientId is saved, use it. Otherwise, generate the default from the MAC address.
+                if (data.config.clientId) {
+                    mqttClientId.value = data.config.clientId;
+                } else if (data.network && data.network.mac) {
+                    const macParts = data.network.mac.split(':');
+                    if (macParts.length === 6) {
+                        mqttClientId.value = macParts.slice(3).join('').toLowerCase();
+                    }
+                } else {
+                    mqttClientId.value = '';
+                }
+                
+                mqttUsername.value = data.config.username || '';
+                mqttPassword.value = data.config.password || '';
+
+                if (data.config.i2c && data.config.i2c.pca9685) {
+                    for (const [hexAddr, mappings] of Object.entries(data.config.i2c.pca9685)) {
+                        const addr = parseInt(hexAddr.substring(2), 16);
+                        if (Array.isArray(mappings)) {
+                            mappings.forEach((mapValue, i) => {
+                                const input = document.getElementById(`pca-${addr}-${i}`);
+                                if (input) {
+                                    input.value = mapValue;
+                                }
+                            });
+                        }
+                    }
+                }
+
+                groupContainer.innerHTML = '';
+                if (data.config.groups) {
+                    for (const [name, outputs] of Object.entries(data.config.groups)) {
+                        addGroup(name, outputs);
+                    }
+                }
+            }
+        }
+        
+        /**
+         * Adds a new group input row to the UI
+         * @param {string} name - Optional name for the group
+         * @param {Array<number>} outputs - Optional array of output numbers
+         */
+        function addGroup(name = '', outputs = []) {
+            const groupDiv = document.createElement('div');
+            groupDiv.className = 'p-4 border border-gray-700 rounded-lg';
+            
+            const headerDiv = document.createElement('div');
+            headerDiv.className = 'flex items-center gap-2 mb-4';
+            headerDiv.innerHTML = `
+                <input type="text" value="${name}" placeholder="Group Name" class="group-name w-1/3 bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <button class="remove-group-btn bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md transition duration-300">-</button>
+            `;
+            groupDiv.appendChild(headerDiv);
+
+            const availableOutputs = getAvailableOutputs();
+            if (availableOutputs.length > 0) {
+                const checkboxGrid = document.createElement('div');
+                checkboxGrid.className = 'grid grid-cols-4 sm:grid-cols-8 md:grid-cols-12 gap-4';
+                availableOutputs.forEach(outputId => {
+                    const isChecked = outputs.includes(outputId);
+                    const label = document.createElement('label');
+                    label.className = 'group-output-label text-xs';
+                    label.innerHTML = `
+                        <span>${outputId}</span>
+                        <input type="checkbox" value="${outputId}" class="group-output-checkbox mt-1" ${isChecked ? 'checked' : ''}>
+                    `;
+                    checkboxGrid.appendChild(label);
+                });
+                groupDiv.appendChild(checkboxGrid);
+            } else {
+                groupDiv.innerHTML += '<p class="text-sm text-gray-400">No logical outputs defined in I2C Mapping tab.</p>';
+            }
+
+            groupContainer.appendChild(groupDiv);
+
+            groupDiv.querySelector('.remove-group-btn').addEventListener('click', () => {
+                groupDiv.remove();
+            });
+        }
+        
+        /**
+         * Gets a list of all defined logical outputs from the I2C mapping tab
+         * @returns {Array<number>} A sorted array of unique output numbers
+         */
+        function getAvailableOutputs() {
+            const outputs = new Set();
+            i2cMapping.querySelectorAll('input[type="number"]').forEach(input => {
+                const value = parseInt(input.value);
+                if (!isNaN(value) && value > 0) {
+                    outputs.add(value);
+                }
+            });
+            return Array.from(outputs).sort((a, b) => a - b);
+        }
+
+        /**
+         * Gathers all configurations from the UI and saves them to the device
+         */
+        async function saveAllConfigs() {
+            const ip = deviceIpInput.value.trim();
+            if (!ip) {
+                showStatus('Cannot save. No device IP specified.', 'error');
+                return;
+            }
+
+            const mqttConfig = {
+                broker: mqttBroker.value.trim(),
+                port: parseInt(mqttPort.value, 10) || 1883,
+                topicPrefix: mqttTopicPrefix.value.trim(),
+                clientId: mqttClientId.value.trim(),
+                username: mqttUsername.value.trim(),
+                password: mqttPassword.value
+            };
+            
+            const otherConfig = {
+                i2c: getI2cMappingFromUi(),
+                groups: getGroupsFromUi()
+            };
+
+            setLoadingState(saveAllBtn, saveAllBtnText, saveAllSpinner, true);
+            showStatus('Saving all configurations...', 'loading');
+
+            try {
+                // Save MQTT and other configs in parallel
+                const [mqttResponse, configResponse] = await Promise.all([
+                    fetch(`http://${ip}/api/mqtt`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(mqttConfig)
+                    }),
+                    fetch(`http://${ip}/api/config`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(otherConfig)
+                    })
+                ]);
+
+                if (!mqttResponse.ok || !configResponse.ok) {
+                    throw new Error(`HTTP error! Failed to save one or more configurations.`);
+                }
+                showStatus('Configurations saved successfully! The device may restart.', 'success');
+            } catch (error) {
+                console.error('Save error:', error);
+                showStatus('Failed to save configurations.', 'error');
+            } finally {
+                setLoadingState(saveAllBtn, saveAllBtnText, saveAllSpinner, false);
+            }
+        }
+
+        /**
+         * Gathers the I2C mapping from the UI and returns it as an object
+         */
+        function getI2cMappingFromUi() {
+            const i2cConfig = { pca9685: {} };
+            const inputs = i2cMapping.querySelectorAll('input[type="number"]');
+            inputs.forEach(input => {
+                const addr = `0x${parseInt(input.dataset.addr).toString(16)}`;
+                const port = parseInt(input.dataset.port);
+                const value = parseInt(input.value) || 0;
+
+                if (!i2cConfig.pca9685[addr]) {
+                    i2cConfig.pca9685[addr] = new Array(16).fill(0);
+                }
+                i2cConfig.pca9685[addr][port] = value;
+            });
+            return i2cConfig;
+        }
+
+        /**
+         * Gathers the group definitions from the UI
+         */
+        function getGroupsFromUi() {
+            const groups = {};
+            groupContainer.querySelectorAll('.p-4').forEach(groupDiv => {
+                const name = groupDiv.querySelector('.group-name').value.trim();
+                const outputs = [];
+                groupDiv.querySelectorAll('.group-output-checkbox:checked').forEach(checkbox => {
+                    outputs.push(parseInt(checkbox.value));
+                });
+                
+                if (name && outputs.length > 0) {
+                    groups[name] = outputs;
+                }
+            });
+            return groups;
+        }
+
+        /**
+         * Sends a command to control an output or group
+         */
+        async function sendCommand() {
+            const ip = deviceIpInput.value.trim();
+            if (!ip) {
+                showStatus('Cannot send command. No device IP specified.', 'error');
+                return;
+            }
+
+            const target = commandTargetInput.value.trim();
+            const value = commandValueInput.value.trim();
+            const fadeValue = fadeInput.value.trim();
+
+            if (!target || !value) {
+                showStatus('Please enter a target (output/group) and a value.', 'error');
+                return;
+            }
+
+            let command = {};
+
+            // Check if the target is a number (output) or a string (group)
+            if (isNaN(parseInt(target, 10))) {
+                command.group = target;
+            } else {
+                command.output = parseInt(target, 10);
+            }
+
+            // Check if the value is a number (brightness) or a string (state)
+            if (isNaN(parseInt(value, 10))) {
+                command.state = value.toUpperCase();
+            } else {
+                command.brightness = parseInt(value, 10);
+            }
+
+            // Check for a fade value and add it to the command if it exists
+            if (fadeValue) {
+                command.fade = parseInt(fadeValue, 10);
+            }
+
+            setLoadingState(sendCommandBtn, sendCommandBtnText, sendCommandSpinner, true);
+            showStatus(`Sending command to ${target}...`, 'loading');
+
+            try {
+                const response = await fetch(`http://${ip}/api/command`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(command)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                showStatus(`Command sent successfully to ${target}.`, 'success');
+            } catch (error) {
+                console.error('Command error:', error);
+                showStatus('Failed to send command.', 'error');
+            } finally {
+                setLoadingState(sendCommandBtn, sendCommandBtnText, sendCommandSpinner, false);
+            }
+        }
+
+
+        /**
+         * Uploads the selected firmware file to the device
+         */
+        async function uploadFirmware() {
+            const ip = deviceIpInput.value.trim();
+            const file = otaFile.files[0];
+
+            if (!ip) {
+                showStatus('Cannot upload. No device IP specified.', 'error');
+                return;
+            }
+            if (!file) {
+                showStatus('Please select a firmware (.bin) file to upload.', 'error');
+                return;
+            }
+
+            setLoadingState(uploadFwBtn, uploadBtnText, uploadSpinner, true);
+            showStatus(`Uploading ${file.name}...`, 'loading');
+
+            try {
+                const response = await fetch(`http://${ip}/api/ota`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/octet-stream' },
+                    body: file
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                showStatus('Firmware upload successful! The device will now reboot.', 'success');
+            } catch (error) {
+                console.error('Upload error:', error);
+                showStatus('Firmware upload failed. Check console for details.', 'error');
+            } finally {
+                setLoadingState(uploadFwBtn, uploadBtnText, uploadSpinner, false);
+            }
+        }
+
+        /**
+         * Sends the restart command to the device
+         */
+        async function restartDevice() {
+            const ip = deviceIpInput.value.trim();
+            if (!ip) {
+                showStatus('Cannot restart. No device IP specified.', 'error');
+                return;
+            }
+
+            const command = { restart: true };
+
+            setLoadingState(restartBtn, restartBtnText, restartSpinner, true);
+            showStatus('Sending restart command...', 'loading');
+
+            try {
+                // CORRECTED URL: Added /api/ prefix
+                const response = await fetch(`http://${ip}/api/command`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(command)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                showStatus('Restart command sent successfully. The device will now reboot.', 'success');
+            } catch (error) {
+                console.error('Restart error:', error);
+                showStatus('Failed to send restart command.', 'error');
+            } finally {
+                setLoadingState(restartBtn, restartBtnText, restartSpinner, false);
+            }
+        }
+
+        /**
+         * Displays a status message to the user
+         * @param {string} message - The message to display
+         * @param {'success'|'error'|'loading'} type - The type of message
+         */
+        function showStatus(message, type) {
+            statusMessage.textContent = message;
+            statusMessage.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400');
+            switch (type) {
+                case 'success':
+                    statusMessage.classList.add('text-green-400');
+                    break;
+                case 'error':
+                    statusMessage.classList.add('text-red-400');
+                    break;
+                case 'loading':
+                    statusMessage.classList.add('text-yellow-400');
+                    break;
+            }
+        }
+        
+        /**
+         * Toggles the loading state of a button (shows/hides spinner)
+         * @param {HTMLElement} button - The button element
+         * @param {HTMLElement} textEl - The text span inside the button
+         * @param {HTMLElement} spinnerEl - The spinner div inside the button
+         * @param {boolean} isLoading - True to show spinner, false to hide
+         */
+        function setLoadingState(button, textEl, spinnerEl, isLoading) {
+            if (isLoading) {
+                button.disabled = true;
+                textEl.classList.add('hidden');
+                spinnerEl.classList.remove('hidden');
+            } else {
+                button.disabled = false;
+                textEl.classList.remove('hidden');
+                spinnerEl.classList.add('hidden');
+            }
+        }
+
+        // On page load, try to get the last used IP from local storage
+        const savedIp = localStorage.getItem('oxrsDeviceIp');
+        if (savedIp) {
+            deviceIpInput.value = savedIp;
+        }
+    </script>
+</body>
+</html>
