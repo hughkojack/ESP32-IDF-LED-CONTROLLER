@@ -38,6 +38,7 @@ flowchart LR
     CAN <--> CANBUS
 ```
 🛠️ Build Instructions
+
 Prerequisites
 ESP-IDF v5.4
 
@@ -82,23 +83,24 @@ Endpoint	Method	Description
 /api/ota	POST	Perform OTA update
 /	GET	Serve HTML/JS web UI (from flash)
 
-📂 Repository Structure
-bash
+## 📂 Repository Structure
 
 ESP32-IDF-LED-CONTROLLER/
 ├── components/
-│   ├── hsg_api/          # API + web server logic
-│   ├── mcp2515/          # CAN bus driver
-│   └── cJSON/            # JSON support
+│ ├── hsg_api/ # API + web server logic
+│ ├── mcp2515/ # CAN bus driver
+│ └── cJSON/ # JSON support
 ├── src/
-│   └── main.cpp          # Main application logic
-├── ESP32-POE.html        # Web interface (embedded)
-├── README.md             # This file
-└── CMakeLists.txt
-⚡ Notes
-The ESP32 will prefer Ethernet if connected, and fall back to Wi-Fi otherwise.
+│ └── main.cpp # Main application logic
+├── ESP32-POE.html # Web interface (embedded in firmware)
+├── README.md # Project documentation
+├── CMakeLists.txt # Build configuration
+└── sdkconfig # ESP-IDF project config
 
-CAN bus is handled through MCP2515 over SPI with interrupt-driven reception.
+markdown
+Copy code
 
-I²C is available for LED control (e.g., via PCA9685) but can be extended for other peripherals.
-
+### Notes
+- ⚡ The ESP32 will **prefer Ethernet** if connected, and fall back to **Wi-Fi** otherwise.  
+- 🚌 CAN bus is handled through MCP2515 over SPI with **interrupt-driven reception**.  
+- 💡 I²C is available for LED control (e.g., via PCA9685) but can be extended for other peripherals.  
