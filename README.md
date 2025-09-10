@@ -36,7 +36,7 @@ flowchart LR
     end
 
     CAN <--> CANBUS
-
+```
 🛠️ Build Instructions
 Prerequisites
 ESP-IDF v5.4
