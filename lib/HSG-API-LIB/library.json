@@ -1,0 +1,18 @@
+{
+  "name": "HSG-API-LIB",
+  "version": "2.8.0",
+  "description": "API library for Open eXtensible ESP32-POE light control projects",
+  "keywords": "api, web, rest",
+  "authors": [
+    {
+      "name": "Hugh Kojack",
+      "email": "hugh.kojack@gmail.com"
+    }
+  ],
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": {
+    "bblanchon/ArduinoJson": "^6.19.4",
+    "aWOT": "https://github.com/lasselukkari/aWOT.git"
+  }
+}

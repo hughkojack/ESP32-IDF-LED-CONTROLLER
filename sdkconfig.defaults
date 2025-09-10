@@ -1,0 +1,10 @@
+# Disable OpenThread (causing your .git error)
+CONFIG_OPENTHREAD_ENABLED=n
+
+# Optional: shrink build by disabling unused protocols
+CONFIG_LWIP_IPV6=n
+CONFIG_MDNS_ENABLED=n
+
+# Disable ESP-IDF git revision checks
+CONFIG_APP_PROJECT_VER_FROM_CONFIG=y
+CONFIG_APP_PROJECT_VER="1.0.0"

@@ -1,0 +1,3 @@
+[submodule "components/mcp2515"]
+	path = components/mcp2515
+	url = https://github.com/Microver-Electronics/mcp2515-esp32-idf.git

@@ -1,0 +1,18 @@
+{
+  "name": "HSG-MQTT-LIB",
+  "version": "1.0.0",
+  "description": "MQTT library for HSG projects",
+  "keywords": "mqtt, networking",
+  "authors": [
+    {
+      "name": "Hugh Kojack",
+      "email": "hugh.kojack@gmail.com"
+    }
+  ],
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": {
+    "bblanchon/ArduinoJson": "^6.19.4",
+    "bblanchon/StreamUtils": "^1.7.3"
+  }
+}

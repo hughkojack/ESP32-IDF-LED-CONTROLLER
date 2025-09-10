@@ -1,0 +1,19 @@
+# General OS and editor files
+.DS_Store
+*~
+*.swp
+.history/
+
+# PlatformIO
+.pio/
+.sconsign.py
+
+# VSCode
+.vscode/
+
+/build/
+/sdkconfig.old
+*.log
+*.bin
+*.elf
+*.map
