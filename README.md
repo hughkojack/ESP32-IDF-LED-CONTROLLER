@@ -1,101 +1,104 @@
 # ESP32-IDF-LED-CONTROLLER
 
-ESP32-POE project using **ESP-IDF** that integrates:
+An ESP-IDF project for the **Olimex ESP32-POE** board, integrating:
 
-- Ethernet + Wi-Fi failover networking  
-- MCP2515 CAN bus controller  
-- I²C devices (e.g. PCA9685 for LED dimming)  
-- Embedded HTTP server serving an HTML UI from flash  
-- REST-like API endpoints (`/api/...`) for configuration and control  
+- ✅ **Ethernet & Wi-Fi failover** networking  
+- ✅ **HTTP server with REST API**  
+- ✅ **HTML web interface** (embedded in firmware)  
+- ✅ **CAN bus** support via MCP2515  
+- ✅ **I²C LED control** (e.g., PCA9685 PWM driver)
 
 ---
-
-## 📂 Project Structure
-ESP32-IDF-LED-CONTROLLER/
-├── components/
-│ ├── hsg_api/ # Custom API + HTML serving logic
-│ ├── mcp2515/ # CAN bus driver for MCP2515
-│ └── cJSON/ # JSON parsing
-├── src/
-│ └── main.cpp # Application entry point (app_main)
-├── docs/
-│ └── architecture.png # System architecture diagram
-├── sdkconfig # ESP-IDF configuration
-└── CMakeLists.txt
 
 ## 📡 System Architecture
 
-The ESP32-POE acts as a central controller, bridging Ethernet/Wi-Fi, CAN bus, and I²C-driven LEDs.
+```mermaid
+flowchart LR
+    subgraph Browser["🌐 Browser"]
+        UI["HTML/JS Web UI"]
+    end
 
-![System Architecture](docs/architecture.png)
+    subgraph ESP32["ESP32-POE"]
+        NET["Ethernet / Wi-Fi<br>(Failover)"]
+        API["HTTP Server + REST API"]
+        CAN["MCP2515<br>CAN Bus"]
+        I2C["I²C LED Driver<br>(e.g. PCA9685)"]
+    end
 
----
+    UI <--> NET
+    NET --> API
+    API --> CAN
+    API --> I2C
 
-## 🌐 Networking
-- By default the ESP32-POE uses **Ethernet** if a cable is connected.  
-- If Ethernet is not available, it falls back to **Wi-Fi** (configured via `sdkconfig`).  
-- Logs show which interface is active and the assigned IP.
+    subgraph CANBUS["CAN Bus"]
+        ECU1["ECU / Device 1"]
+        ECU2["ECU / Device 2"]
+    end
 
----
+    CAN <--> CANBUS
 
-## 💡 Embedded HTML
-The web UI (`ESP32-POE.html`) is embedded directly into flash using:
+🛠️ Build Instructions
+Prerequisites
+ESP-IDF v5.4
 
-```cmake
-# components/hsg_api/CMakeLists.txt
+Olimex ESP32-POE hardware
+
+Git + CMake + Ninja build tools
+
+Clone Repository
+bash
+git clone https://github.com/hughkojack/ESP32-IDF-LED-CONTROLLER.git
+cd ESP32-IDF-LED-CONTROLLER
+idf.py set-target esp32
+
+Build & Flash
+bash
+
+idf.py build
+idf.py flash -p COMx   # replace COMx with your serial port
+idf.py monitor
+
+🌐 Web Interface
+The HTML/JS frontend (ESP32-POE.html) is embedded into flash at build time.
+
+This is done via the component CMakeLists:
+
+cmake
 target_add_binary_data(${COMPONENT_TARGET} ESP32-POE.html TEXT)
 
+At runtime, the root URI / serves the embedded page.
 
-ESP-IDF converts the file into linker symbols:
-
-extern const uint8_t _binary_ESP32_POE_html_start[] asm("_binary_ESP32_POE_html_start");
-extern const uint8_t _binary_ESP32_POE_html_end[]   asm("_binary_ESP32_POE_html_end");
-
-
-At runtime, the / handler responds with the embedded HTML page:
-
-static esp_err_t h_root(httpd_req_t *req) {
-    const size_t html_size = _binary_ESP32_POE_html_end - _binary_ESP32_POE_html_start;
-    httpd_resp_set_type(req, "text/html");
-    return httpd_resp_send(req, (const char *)_binary_ESP32_POE_html_start, html_size);
-}
-
-So no SD card, SPIFFS, or external storage is needed — the UI is built into the firmware.
+The page interacts with the ESP32 through REST API endpoints (e.g., /api/config, /api/command).
 
 🔌 API Endpoints
+Endpoint	Method	Description
+/api/adopt	GET	Adoption test endpoint
+/api/config	GET	Fetch configuration JSON
+/api/config	POST	Update configuration
+/api/mqtt	GET	Get MQTT settings
+/api/mqtt	POST	Update MQTT settings
+/api/command	POST	Execute command
+/api/can/last	GET	Get last received CAN frame
+/api/ota	POST	Perform OTA update
+/	GET	Serve HTML/JS web UI (from flash)
 
-The API is handled inside the hsg_api component. Examples:
+📂 Repository Structure
+bash
 
-GET /api/config → returns configuration JSON
+ESP32-IDF-LED-CONTROLLER/
+├── components/
+│   ├── hsg_api/          # API + web server logic
+│   ├── mcp2515/          # CAN bus driver
+│   └── cJSON/            # JSON support
+├── src/
+│   └── main.cpp          # Main application logic
+├── ESP32-POE.html        # Web interface (embedded)
+├── README.md             # This file
+└── CMakeLists.txt
+⚡ Notes
+The ESP32 will prefer Ethernet if connected, and fall back to Wi-Fi otherwise.
 
-POST /api/config → update configuration
+CAN bus is handled through MCP2515 over SPI with interrupt-driven reception.
 
-GET /api/mqtt / POST /api/mqtt → manage MQTT settings
-
-POST /api/command → execute a control command
-
-GET /api/can/last → fetch last CAN frame received
-
-POST /api/ota → handle firmware updates
-
-🛠️ Build & Flash
-Prerequisites
-
-ESP-IDF v5.4
- installed and exported
-
-ESP32-POE board connected via USB
-
-
-Commands
-idf.py set-target esp32
-idf.py build
-idf.py -p COM3 flash monitor   # replace COM3 with your serial port
-
-🔍 Example Logs
-I (3321) MAIN: ETH IP: 192.168.1.162
-I (3321) HSG-API: API URIs registered
-I (3321) HSG-API: HTTP API ready on :80
-I (3331) MAIN: MCP2515 ready
-
+I²C is available for LED control (e.g., via PCA9685) but can be extended for other peripherals.
 
