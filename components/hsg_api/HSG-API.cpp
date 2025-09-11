@@ -146,6 +146,25 @@ static esp_err_t h_adopt(httpd_req_t* req) {
 
 // GET /api/config
 static esp_err_t h_config_get(httpd_req_t* req) {
+    cJSON* root = load_cfg_json();
+    ensure_layout(root);
+
+    // Only send back the "config" section (without wrapper)
+    cJSON* config = cJSON_GetObjectItem(root, "config");
+    if (!config) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no config");
+        cJSON_Delete(root);
+        return ESP_FAIL;
+    }
+
+    char* out = cJSON_PrintUnformatted(config);
+    esp_err_t res = httpd_resp_sendstr(req, out);
+    free(out);
+    cJSON_Delete(root);
+    return res;
+}
+/*
+static esp_err_t h_config_get(httpd_req_t* req) {
     cJSON* full = load_cfg_json();
     ensure_layout(full);
     cJSON* out = cJSON_CreateObject();
@@ -153,29 +172,54 @@ static esp_err_t h_config_get(httpd_req_t* req) {
     cJSON_Delete(full);
     return send_json(req, out);
 }
-
+*/
 // POST /api/config
 static esp_err_t h_config_post(httpd_req_t* req) {
     auto body = req_read_all(req);
+    ESP_LOGI(TAG, "Config POST body: %s", body.c_str());
+
     cJSON* posted = cJSON_Parse(body.c_str());
-    if (!posted) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    if (!posted) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    }
 
     cJSON* full = load_cfg_json();
     ensure_layout(full);
     cJSON* config = cJSON_GetObjectItem(full, "config");
 
-    // Merge "i2c" & "groups" (replace)
+    // Always replace i2c and groups from posted data
     for (auto key : { "i2c", "groups" }) {
-        cJSON* v = cJSON_GetObjectItem(posted, key);
-        if (v) {
+        cJSON* new_val = cJSON_GetObjectItem(posted, key);
+        if (new_val) {
             cJSON_DeleteItemFromObject(config, key);
-            cJSON_AddItemToObject(config, key, cJSON_Duplicate(v, 1));
+            cJSON_AddItemToObject(config, key, cJSON_Duplicate(new_val, 1));
+            ESP_LOGI(TAG, "Replaced config section: %s", key);
         }
     }
+
+    // Merge other keys (like mqtt) into config
+    cJSON* posted_cfg = cJSON_GetObjectItem(posted, "config");
+    if (posted_cfg) {
+        cJSON* child = posted_cfg->child;
+        while (child) {
+            if (!cJSON_GetObjectItem(config, child->string)) {
+                cJSON_AddItemToObject(config, child->string, cJSON_Duplicate(child, 1));
+                ESP_LOGI(TAG, "Added new config key: %s", child->string);
+            }
+            child = child->next;
+        }
+    }
+
     cJSON_Delete(posted);
+
     ensure_layout(full);
+    char* merged = cJSON_PrintUnformatted(full);
+    ESP_LOGI(TAG, "Config merged: %s", merged);
+    free(merged);
+
     save_cfg_json(full);
     cJSON_Delete(full);
+
     return httpd_resp_sendstr(req, "OK");
 }
 

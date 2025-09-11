@@ -104,7 +104,7 @@
                     </div>
                     <div>
                         <label for="mqttTopicPrefix" class="block text-sm font-medium text-gray-300">Topic Prefix</label>
-                        <input type="text" id="mqttTopicPrefix" placeholder="e.g., oxrs/" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <input type="text" id="mqttTopicPrefix" placeholder="e.g., HSG/" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                     </div>
                     <div>
                         <label for="mqttClientId" class="block text-sm font-medium text-gray-300">Client ID</label>
@@ -364,7 +364,7 @@
             if (data.config) {
                 mqttBroker.value = data.config.broker || '';
                 mqttPort.value = data.config.port || '';
-                mqttTopicPrefix.value = data.config.topicPrefix || 'oxrs/';
+                mqttTopicPrefix.value = data.config.topicPrefix || 'HSG/';
                 
                 // If a clientId is saved, use it. Otherwise, generate the default from the MAC address.
                 if (data.config.clientId) {
