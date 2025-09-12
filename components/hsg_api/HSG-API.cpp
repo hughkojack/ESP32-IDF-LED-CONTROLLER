@@ -262,6 +262,8 @@ static esp_err_t h_command(httpd_req_t* req) {
     auto body = req_read_all(req);
     cJSON* cmd = cJSON_Parse(body.c_str());
     if (!cmd) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    
+    ESP_LOGI("HSG-API", "Command received: %s", body.c_str());
 
     if (cJSON_IsTrue(cJSON_GetObjectItem(cmd, "restart"))) {
         cJSON_Delete(cmd);
