@@ -28,6 +28,7 @@ extern "C" {
 #include "esp_eth_mac.h"
 
 #include "HSG-API.h"
+#include "hsg_outputs.h"
 
 static const char *TAG = "MAIN";
 
@@ -414,15 +415,15 @@ extern "C" void app_main(void) {
     HSG::API::Init api_init;
     api_init.i2c_port = I2C_NUM_0;        // your initialized I2C port
     api_init.output_cb = [](int out, int brightness, int fade_ms){
-        // TODO: map logical 'out' to PCA9685 (addr/channel) & set duty
+        hsg_outputs_set(out, brightness, fade_ms);
     };
     api_init.group_cb = [](const char* name, const char* state, int fade_ms){
-        // TODO: look up group -> outputs in stored JSON (HSG::API::get_config_json()) and set each
+        hsg_outputs_set_group(name, state, fade_ms);
     };
 
     ESP_ERROR_CHECK(HSG::API::start(api_init));
+    ESP_ERROR_CHECK(hsg_outputs_init(I2C_NUM_0));
 
-        
     // 3) I2C ready
     ESP_ERROR_CHECK(i2c_master_init());
     ESP_LOGI(TAG, "I2C ready: SDA=%d SCL=%d @%dHz",

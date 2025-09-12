@@ -1,4 +1,5 @@
 #include "HSG-API.h"
+#include "hsg_outputs.h"
 
 #include <cstring>
 #include <string>
@@ -227,6 +228,9 @@ static esp_err_t h_config_post(httpd_req_t* req) {
     if (merged) free(merged);
 
     save_cfg_json(full);
+    // 🔄 Reload outputs with new config
+    hsg_outputs_reload_config();
+
     cJSON_Delete(full);
     return httpd_resp_sendstr(req, "OK");
 }
@@ -337,11 +341,22 @@ static esp_err_t h_ota(httpd_req_t* req) {
     return ESP_OK;
 }
 
+
 } // namespace (anon)
 
 // ------------------ Public API ------------------
 namespace HSG {
 namespace API {
+
+
+cJSON* get_config_json_obj() {
+    cJSON* root = load_cfg_json();   // already implemented in your file
+    if (!root) {
+        ESP_LOGW(TAG, "get_config_json_obj: no config in NVS");
+        return nullptr;
+    }
+    return root;  // caller must cJSON_Delete()
+}
 
 esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     if (!server) {

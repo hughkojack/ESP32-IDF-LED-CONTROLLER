@@ -3,6 +3,7 @@
 #include <functional>
 #include <string>
 #include "esp_http_server.h"
+#include "cJSON.h"
 
 // Minimal CAN frame (compatible with your MCP2515 struct)
 struct HSG_CanFrame {
@@ -45,6 +46,8 @@ void update_last_can(const HSG_CanFrame& f);
 //               "groups": { "name":[outputs...] },
 //               "mqtt": { "broker": "...", "port": 1883, "topicPrefix": "...", "clientId": "...", "username":"...", "password":"..." } } }
 std::string get_config_json();             // returns full JSON string (pretty-printed)
+cJSON* get_config_json_obj();  // caller must free with cJSON_Delete()
+
 esp_err_t   set_config_json(const char*);  // replaces the stored JSON (validates minimal schema)
 
 // Convenience: read MQTT subtree as separate JSON (string)

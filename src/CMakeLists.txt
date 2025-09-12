@@ -15,5 +15,6 @@ idf_component_register(
         nvs_flash
         esp_eth
         cJSON          # private dependency (not exposed to other components
-        hsg_api    
+        hsg_api
+        hsg_outputs    
 )
