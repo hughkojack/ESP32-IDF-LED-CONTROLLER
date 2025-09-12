@@ -50,5 +50,9 @@ esp_err_t   set_config_json(const char*);  // replaces the stored JSON (validate
 // Convenience: read MQTT subtree as separate JSON (string)
 std::string get_mqtt_json();
 
+// Scans I2C bus for PCA9685 devices, adds defaults to config if missing,
+// and removes any PCA9685 entries from config that are no longer present on bus.
+esp_err_t scan_and_prune_i2c(int i2c_port);
+
 } // namespace API
 } // namespace HSG

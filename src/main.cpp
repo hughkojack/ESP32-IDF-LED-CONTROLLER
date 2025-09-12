@@ -421,19 +421,14 @@ extern "C" void app_main(void) {
     };
 
     ESP_ERROR_CHECK(HSG::API::start(api_init));
-    
-    // Register all API URIs on the existing server
-    //ESP_ERROR_CHECK(HSG::API::register_uris(server, api_init));
-    //------------------------------------------------------------------------------------------
 
-    // 2) Bring up HTTP after at least one IP is available
- //   httpd_handle_t server = web_start();
- 
-    
+        
     // 3) I2C ready
     ESP_ERROR_CHECK(i2c_master_init());
     ESP_LOGI(TAG, "I2C ready: SDA=%d SCL=%d @%dHz",
              I2C_MASTER_SDA_IO, I2C_MASTER_SCL_IO, I2C_MASTER_FREQ_HZ);
+
+    HSG::API::scan_and_prune_i2c(I2C_MASTER_NUM);  // after driver is installed
 
     // 4) MCP2515 + IRQ
     gpio_config_t io_conf = {};

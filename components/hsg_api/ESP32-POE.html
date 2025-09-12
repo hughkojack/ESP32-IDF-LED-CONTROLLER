@@ -335,6 +335,7 @@
             // I2C Mapping
             i2cMapping.innerHTML = ''; // Clear previous content
             if (data.i2c && data.i2c.pca9685 && data.i2c.pca9685.length > 0) {
+                console.log("I2C length:", data.i2c.pca9685.length);
                 data.i2c.pca9685.forEach(addr => {
                     const deviceContainer = document.createElement('div');
                     const hexAddr = `0x${addr.toString(16)}`;
