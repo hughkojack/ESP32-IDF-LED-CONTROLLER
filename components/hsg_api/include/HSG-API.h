@@ -33,9 +33,11 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init);
 // Call once after networking is up (Wi-Fi or ETH has an IP).
 // Starts the HTTP server (port 80) and registers all /api/* handlers.
 esp_err_t start(const Init& init);
-
-// Stop HTTP server (optional)
 void stop();
+
+// --- MQTT Client Functions ---
+esp_err_t mqtt_start();
+void mqtt_stop();
 
 // Update the "last CAN frame" cache (exposed at GET /api/can/last)
 void update_last_can(const HSG_CanFrame& f);

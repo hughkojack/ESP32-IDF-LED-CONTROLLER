@@ -1,5 +1,6 @@
 #include "HSG-API.h"
 #include "hsg_outputs.h"
+#include "mqtt_client.h"
 
 #include <cstring>
 #include <string>
@@ -29,6 +30,8 @@ httpd_handle_t g_http = nullptr;
 HSG::API::Init g_init{};
 HSG_CanFrame g_last{};
 SemaphoreHandle_t g_last_mutex = nullptr;
+esp_mqtt_client_handle_t g_mqtt_client = nullptr;
+static std::string g_mqtt_command_topic;
 
 // ------------------ small helpers ------------------
 static esp_err_t send_json(httpd_req_t *req, cJSON *root) {
@@ -537,6 +540,109 @@ std::string get_mqtt_json() {
     if (txt) free(txt);
     cJSON_Delete(full);
     return out;
+}
+
+// --- MQTT event handler (now internal to the component) ---
+static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_t event_id, void* event_data) {
+    esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
+    esp_mqtt_client_handle_t client = event->client;
+
+    switch ((esp_mqtt_event_id_t)event_id) {
+        case MQTT_EVENT_CONNECTED:
+            ESP_LOGI(TAG, "MQTT Connected");
+            if (!g_mqtt_command_topic.empty()) {
+                esp_mqtt_client_subscribe(client, g_mqtt_command_topic.c_str(), 0);
+                ESP_LOGI(TAG, "Subscribed to command topic: %s", g_mqtt_command_topic.c_str());
+            }
+            break;
+        case MQTT_EVENT_DISCONNECTED:
+            ESP_LOGI(TAG, "MQTT Disconnected");
+            break;
+        case MQTT_EVENT_DATA:{
+            if (!g_mqtt_command_topic.empty() && 
+                event->topic_len == g_mqtt_command_topic.length() && 
+                strncmp(event->topic, g_mqtt_command_topic.c_str(), event->topic_len) == 0) {
+
+                std::string data(event->data, event->data_len);
+                ESP_LOGI(TAG, "MQTT Command received on topic %s: %s", g_mqtt_command_topic.c_str(), data.c_str());
+                // TODO: Process the command
+            }
+            break;
+        }    
+        default:
+            ESP_LOGD(TAG, "Unhandled MQTT event id: %d", (int)event_id);
+            break;
+    }
+}
+
+esp_err_t mqtt_start() {
+    std::string mqtt_json_str = HSG::API::get_mqtt_json();
+    cJSON* mqtt_json = cJSON_Parse(mqtt_json_str.c_str());
+
+    if (!mqtt_json) {
+        ESP_LOGE(TAG, "Failed to parse MQTT JSON from API");
+        return ESP_FAIL;
+    }
+
+    const cJSON* broker = cJSON_GetObjectItem(mqtt_json, "broker");
+    if (!cJSON_IsString(broker) || broker->valuestring == NULL || strlen(broker->valuestring) == 0) {
+        ESP_LOGW(TAG, "MQTT broker not configured. MQTT not started.");
+        cJSON_Delete(mqtt_json);
+        return ESP_OK; // Not an error, just not configured
+    }
+
+    const cJSON* clientId_json = cJSON_GetObjectItem(mqtt_json, "clientId");
+    if (!cJSON_IsString(clientId_json) || clientId_json->valuestring == NULL) {
+        ESP_LOGE(TAG, "MQTT clientId not found in config. Cannot subscribe to command topic.");
+        cJSON_Delete(mqtt_json);
+        return ESP_FAIL;
+    }
+
+     // --- FIX: Get the topicPrefix and build the full topic ---
+    const cJSON* prefix_json = cJSON_GetObjectItem(mqtt_json, "topicPrefix");
+    std::string clientId(clientId_json->valuestring);
+
+    if (cJSON_IsString(prefix_json) && prefix_json->valuestring != NULL && strlen(prefix_json->valuestring) > 0) {
+        // If prefix exists, build topic as: prefix/clientId/cmnd
+        std::string prefix(prefix_json->valuestring);
+        g_mqtt_command_topic = prefix + clientId + "/cmnd";
+    } else {
+        // Fallback if no prefix is set: clientId/cmnd
+        g_mqtt_command_topic = clientId + "/cmnd";
+    }
+    // --- END FIX ---
+
+
+    std::string broker_uri = "mqtt://" + std::string(broker->valuestring);
+
+    esp_mqtt_client_config_t mqtt_cfg = {};
+    mqtt_cfg.broker.address.uri = broker_uri.c_str();
+
+    const cJSON* port = cJSON_GetObjectItem(mqtt_json, "port");
+    if (cJSON_IsNumber(port)) {
+        mqtt_cfg.broker.address.port = port->valueint;
+    }
+
+    // Optional credentials
+    const cJSON* user = cJSON_GetObjectItem(mqtt_json, "username");
+    if(cJSON_IsString(user)) mqtt_cfg.credentials.username = user->valuestring;
+    const cJSON* pass = cJSON_GetObjectItem(mqtt_json, "password");
+    if(cJSON_IsString(pass)) mqtt_cfg.credentials.authentication.password = pass->valuestring;
+
+    g_mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
+    esp_mqtt_client_register_event(g_mqtt_client, (esp_mqtt_event_id_t)ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
+    esp_err_t err = esp_mqtt_client_start(g_mqtt_client);
+
+    cJSON_Delete(mqtt_json);
+    return err;
+}
+
+void mqtt_stop() {
+    if (g_mqtt_client) {
+        esp_mqtt_client_stop(g_mqtt_client);
+        esp_mqtt_client_destroy(g_mqtt_client);
+        g_mqtt_client = nullptr;
+    }
 }
 
 } // namespace API

@@ -5,3 +5,4 @@
 
 esp_err_t pca9685_init(i2c_port_t port, uint8_t addr, int freq_hz);
 esp_err_t pca9685_set_pwm(i2c_port_t port, uint8_t addr, int channel, int duty, int fade_ms);
+esp_err_t pca9685_write_pwm_value(i2c_port_t port, uint8_t addr, int channel, uint16_t value);

@@ -20,21 +20,21 @@
 					"targetIndexes" : 
 					[
 						0,
-						78,
-						80,
-						83,
-						85,
-						94,
-						96,
+						79,
+						81,
+						84,
+						86,
+						95,
 						97,
 						98,
-						104,
+						99,
 						105,
-						113,
+						106,
 						114,
 						115,
 						116,
-						117
+						117,
+						118
 					]
 				},
 				{
@@ -127,7 +127,8 @@
 						94,
 						95,
 						96,
-						97
+						97,
+						98
 					],
 					"hasInstallRule" : true,
 					"minimumCMakeVersion" : 
@@ -149,7 +150,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_ringbuf",
 					"targetIndexes" : 
 					[
-						31
+						32
 					]
 				},
 				{
@@ -164,13 +165,13 @@
 					"targetIndexes" : 
 					[
 						13,
-						87,
 						88,
 						89,
 						90,
 						91,
-						111,
-						112
+						92,
+						112,
+						113
 					]
 				},
 				{
@@ -184,7 +185,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_timer",
 					"targetIndexes" : 
 					[
-						35
+						36
 					]
 				},
 				{
@@ -198,7 +199,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_ipc",
 					"targetIndexes" : 
 					[
-						25
+						26
 					]
 				},
 				{
@@ -226,7 +227,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_pm",
 					"targetIndexes" : 
 					[
-						30
+						31
 					]
 				},
 				{
@@ -245,8 +246,8 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mbedtls",
 					"targetIndexes" : 
 					[
-						51,
-						86
+						53,
+						87
 					]
 				},
 				{
@@ -267,7 +268,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mbedtls/mbedtls",
 					"targetIndexes" : 
 					[
-						79
+						80
 					]
 				},
 				{
@@ -303,10 +304,10 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mbedtls/mbedtls/library",
 					"targetIndexes" : 
 					[
-						99,
 						100,
 						101,
-						102
+						102,
+						103
 					]
 				},
 				{
@@ -320,8 +321,8 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/bootloader",
 					"targetIndexes" : 
 					[
-						84,
-						93
+						85,
+						94
 					]
 				},
 				{
@@ -335,9 +336,9 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esptool_py",
 					"targetIndexes" : 
 					[
-						81,
 						82,
-						92
+						83,
+						93
 					]
 				},
 				{
@@ -351,12 +352,12 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/partition_table",
 					"targetIndexes" : 
 					[
-						95,
-						106,
+						96,
 						107,
 						108,
 						109,
-						110
+						110,
+						111
 					]
 				},
 				{
@@ -398,7 +399,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/spi_flash",
 					"targetIndexes" : 
 					[
-						65
+						66
 					]
 				},
 				{
@@ -412,7 +413,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/nvs_flash",
 					"targetIndexes" : 
 					[
-						57
+						58
 					]
 				},
 				{
@@ -426,7 +427,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/pthread",
 					"targetIndexes" : 
 					[
-						62
+						63
 					]
 				},
 				{
@@ -440,7 +441,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_gdbstub",
 					"targetIndexes" : 
 					[
-						19
+						20
 					]
 				},
 				{
@@ -454,7 +455,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/espcoredump",
 					"targetIndexes" : 
 					[
-						38
+						39
 					]
 				},
 				{
@@ -468,7 +469,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_phy",
 					"targetIndexes" : 
 					[
-						29
+						30
 					]
 				},
 				{
@@ -486,9 +487,9 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_system",
 					"targetIndexes" : 
 					[
-						34,
-						77,
-						103
+						35,
+						78,
+						104
 					]
 				},
 				{
@@ -526,7 +527,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/xtensa",
 					"targetIndexes" : 
 					[
-						76
+						77
 					]
 				},
 				{
@@ -550,7 +551,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_common",
 					"targetIndexes" : 
 					[
-						16
+						17
 					]
 				},
 				{
@@ -564,7 +565,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_rom",
 					"targetIndexes" : 
 					[
-						32
+						33
 					]
 				},
 				{
@@ -578,7 +579,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/hal",
 					"targetIndexes" : 
 					[
-						43
+						44
 					]
 				},
 				{
@@ -592,7 +593,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/vfs",
 					"targetIndexes" : 
 					[
-						72
+						73
 					]
 				},
 				{
@@ -606,7 +607,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_eth",
 					"targetIndexes" : 
 					[
-						17
+						18
 					]
 				},
 				{
@@ -620,7 +621,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/tcpip_adapter",
 					"targetIndexes" : 
 					[
-						69
+						70
 					]
 				},
 				{
@@ -634,7 +635,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_netif",
 					"targetIndexes" : 
 					[
-						28
+						29
 					]
 				},
 				{
@@ -648,7 +649,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_event",
 					"targetIndexes" : 
 					[
-						18
+						19
 					]
 				},
 				{
@@ -662,7 +663,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/wpa_supplicant",
 					"targetIndexes" : 
 					[
-						75
+						76
 					]
 				},
 				{
@@ -676,7 +677,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_wifi",
 					"targetIndexes" : 
 					[
-						37
+						38
 					]
 				},
 				{
@@ -724,7 +725,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/lwip",
 					"targetIndexes" : 
 					[
-						50
+						52
 					]
 				},
 				{
@@ -738,7 +739,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/log",
 					"targetIndexes" : 
 					[
-						49
+						51
 					]
 				},
 				{
@@ -752,7 +753,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/heap",
 					"targetIndexes" : 
 					[
-						44
+						45
 					]
 				},
 				{
@@ -770,7 +771,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/soc",
 					"targetIndexes" : 
 					[
-						64
+						65
 					]
 				},
 				{
@@ -798,7 +799,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_hw_support",
 					"targetIndexes" : 
 					[
-						24
+						25
 					]
 				},
 				{
@@ -836,7 +837,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/freertos",
 					"targetIndexes" : 
 					[
-						42
+						43
 					]
 				},
 				{
@@ -854,7 +855,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/newlib",
 					"targetIndexes" : 
 					[
-						55
+						56
 					]
 				},
 				{
@@ -944,7 +945,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/unity",
 					"targetIndexes" : 
 					[
-						71
+						72
 					]
 				},
 				{
@@ -986,7 +987,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/nghttp",
 					"targetIndexes" : 
 					[
-						56
+						57
 					]
 				},
 				{
@@ -1014,7 +1015,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_adc_cal",
 					"targetIndexes" : 
 					[
-						15
+						16
 					]
 				},
 				{
@@ -1028,7 +1029,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_hid",
 					"targetIndexes" : 
 					[
-						20
+						21
 					]
 				},
 				{
@@ -1042,7 +1043,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/tcp_transport",
 					"targetIndexes" : 
 					[
-						68
+						69
 					]
 				},
 				{
@@ -1056,7 +1057,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_http_client",
 					"targetIndexes" : 
 					[
-						21
+						22
 					]
 				},
 				{
@@ -1070,7 +1071,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_http_server",
 					"targetIndexes" : 
 					[
-						22
+						23
 					]
 				},
 				{
@@ -1084,7 +1085,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_https_ota",
 					"targetIndexes" : 
 					[
-						23
+						24
 					]
 				},
 				{
@@ -1108,7 +1109,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_lcd",
 					"targetIndexes" : 
 					[
-						26
+						27
 					]
 				},
 				{
@@ -1122,7 +1123,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/protobuf-c",
 					"targetIndexes" : 
 					[
-						60
+						61
 					]
 				},
 				{
@@ -1136,7 +1137,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/protocomm",
 					"targetIndexes" : 
 					[
-						61
+						62
 					]
 				},
 				{
@@ -1150,7 +1151,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mdns",
 					"targetIndexes" : 
 					[
-						53
+						54
 					]
 				},
 				{
@@ -1164,7 +1165,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_local_ctrl",
 					"targetIndexes" : 
 					[
-						27
+						28
 					]
 				},
 				{
@@ -1178,7 +1179,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/sdmmc",
 					"targetIndexes" : 
 					[
-						63
+						64
 					]
 				},
 				{
@@ -1192,7 +1193,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_serial_slave_link",
 					"targetIndexes" : 
 					[
-						33
+						34
 					]
 				},
 				{
@@ -1206,7 +1207,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_websocket_client",
 					"targetIndexes" : 
 					[
-						36
+						37
 					]
 				},
 				{
@@ -1220,7 +1221,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/expat",
 					"targetIndexes" : 
 					[
-						39
+						40
 					]
 				},
 				{
@@ -1234,7 +1235,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/wear_levelling",
 					"targetIndexes" : 
 					[
-						73
+						74
 					]
 				},
 				{
@@ -1248,7 +1249,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/fatfs",
 					"targetIndexes" : 
 					[
-						40
+						41
 					]
 				},
 				{
@@ -1262,7 +1263,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/freemodbus",
 					"targetIndexes" : 
 					[
-						41
+						42
 					]
 				},
 				{
@@ -1286,7 +1287,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/jsmn",
 					"targetIndexes" : 
 					[
-						46
+						48
 					]
 				},
 				{
@@ -1300,7 +1301,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/json",
 					"targetIndexes" : 
 					[
-						47
+						49
 					]
 				},
 				{
@@ -1314,7 +1315,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/libsodium",
 					"targetIndexes" : 
 					[
-						48
+						50
 					]
 				},
 				{
@@ -1328,7 +1329,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mqtt",
 					"targetIndexes" : 
 					[
-						54
+						55
 					]
 				},
 				{
@@ -1342,7 +1343,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/openssl",
 					"targetIndexes" : 
 					[
-						58
+						59
 					]
 				},
 				{
@@ -1356,7 +1357,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/perfmon",
 					"targetIndexes" : 
 					[
-						59
+						60
 					]
 				},
 				{
@@ -1370,7 +1371,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/spiffs",
 					"targetIndexes" : 
 					[
-						66
+						67
 					]
 				},
 				{
@@ -1404,7 +1405,7 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/ulp",
 					"targetIndexes" : 
 					[
-						70
+						71
 					]
 				},
 				{
@@ -1418,21 +1419,21 @@
 					"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/wifi_provisioning",
 					"targetIndexes" : 
 					[
-						74
+						75
 					]
 				},
 				{
-					"build" : "esp-idf/mcp2515",
+					"build" : "esp-idf/esp32-mcp2515",
 					"minimumCMakeVersion" : 
 					{
 						"string" : "3.5"
 					},
 					"parentIndex" : 1,
 					"projectIndex" : 1,
-					"source" : "components/mcp2515",
+					"source" : "components/esp32-mcp2515",
 					"targetIndexes" : 
 					[
-						52
+						15
 					]
 				},
 				{
@@ -1450,6 +1451,20 @@
 					]
 				},
 				{
+					"build" : "esp-idf/hsg_outputs",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.5"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "components/hsg_outputs",
+					"targetIndexes" : 
+					[
+						47
+					]
+				},
+				{
 					"build" : "esp-idf/hsg_api",
 					"minimumCMakeVersion" : 
 					{
@@ -1460,7 +1475,7 @@
 					"source" : "components/hsg_api",
 					"targetIndexes" : 
 					[
-						45
+						46
 					]
 				},
 				{
@@ -1474,7 +1489,7 @@
 					"source" : "src",
 					"targetIndexes" : 
 					[
-						67
+						68
 					]
 				}
 			],
@@ -1494,21 +1509,21 @@
 					"targetIndexes" : 
 					[
 						0,
-						78,
-						80,
-						83,
-						85,
-						94,
-						96,
+						79,
+						81,
+						84,
+						86,
+						95,
 						97,
 						98,
-						104,
+						99,
 						105,
-						113,
+						106,
 						114,
 						115,
 						116,
-						117
+						117,
+						118
 					]
 				},
 				{
@@ -1610,7 +1625,8 @@
 						94,
 						95,
 						96,
-						97
+						97,
+						98
 					],
 					"name" : "esp-idf",
 					"parentIndex" : 0,
@@ -1693,10 +1709,10 @@
 						75,
 						76,
 						77,
-						81,
+						78,
 						82,
-						84,
-						86,
+						83,
+						85,
 						87,
 						88,
 						89,
@@ -1704,15 +1720,16 @@
 						91,
 						92,
 						93,
-						95,
-						103,
-						106,
+						94,
+						96,
+						104,
 						107,
 						108,
 						109,
 						110,
 						111,
-						112
+						112,
+						113
 					]
 				},
 				{
@@ -1727,11 +1744,11 @@
 					"parentIndex" : 1,
 					"targetIndexes" : 
 					[
-						79,
-						99,
+						80,
 						100,
 						101,
-						102
+						102,
+						103
 					]
 				}
 			],
@@ -1740,7 +1757,7 @@
 				{
 					"directoryIndex" : 0,
 					"id" : "LED-Controller.elf::@6890427a1f51a3e7e1df",
-					"jsonFile" : "target-LED-Controller.elf-c1b955489fb3071c2f97.json",
+					"jsonFile" : "target-LED-Controller.elf-3c1817e3dc1a1a0268b1.json",
 					"name" : "LED-Controller.elf",
 					"projectIndex" : 0
 				},
@@ -1761,7 +1778,7 @@
 				{
 					"directoryIndex" : 16,
 					"id" : "__idf_app_update::@cc3b426666063acc9674",
-					"jsonFile" : "target-__idf_app_update-3bfaa79e8dfa3006b172.json",
+					"jsonFile" : "target-__idf_app_update-28d9674fdc63dd052ed4.json",
 					"name" : "__idf_app_update",
 					"projectIndex" : 1
 				},
@@ -1840,6 +1857,13 @@
 					"id" : "__idf_esp-tls::@fec40229f530785b7d3e",
 					"jsonFile" : "target-__idf_esp-tls-aff8dbc01dd6a9090ae1.json",
 					"name" : "__idf_esp-tls",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 94,
+					"id" : "__idf_esp32-mcp2515::@f508b1c14a97aa31c63a",
+					"jsonFile" : "target-__idf_esp32-mcp2515-3135672a55ad86d66e87.json",
+					"name" : "__idf_esp32-mcp2515",
 					"projectIndex" : 1
 				},
 				{
@@ -1929,7 +1953,7 @@
 				{
 					"directoryIndex" : 74,
 					"id" : "__idf_esp_local_ctrl::@d6aad58d2946e56208ef",
-					"jsonFile" : "target-__idf_esp_local_ctrl-10e933431521bfe1faf7.json",
+					"jsonFile" : "target-__idf_esp_local_ctrl-333cdc9d8c0522db9e13.json",
 					"name" : "__idf_esp_local_ctrl",
 					"projectIndex" : 1
 				},
@@ -2053,10 +2077,17 @@
 					"projectIndex" : 1
 				},
 				{
-					"directoryIndex" : 96,
+					"directoryIndex" : 97,
 					"id" : "__idf_hsg_api::@5e692ccf9019b1b8a2bd",
-					"jsonFile" : "target-__idf_hsg_api-bb440fe02ecd54ab3221.json",
+					"jsonFile" : "target-__idf_hsg_api-f78895bea8f6ae2a84b6.json",
 					"name" : "__idf_hsg_api",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 96,
+					"id" : "__idf_hsg_outputs::@d0144b9cc722a39cc467",
+					"jsonFile" : "target-__idf_hsg_outputs-8b217ec61b005b25d99a.json",
+					"name" : "__idf_hsg_outputs",
 					"projectIndex" : 1
 				},
 				{
@@ -2099,13 +2130,6 @@
 					"id" : "__idf_mbedtls::@9d0b8d44c897d31e7973",
 					"jsonFile" : "target-__idf_mbedtls-fbdc8ded636a1f319795.json",
 					"name" : "__idf_mbedtls",
-					"projectIndex" : 1
-				},
-				{
-					"directoryIndex" : 94,
-					"id" : "__idf_mcp2515::@c87a744e9e58b82c85f8",
-					"jsonFile" : "target-__idf_mcp2515-d128ac2b68ea38d4d110.json",
-					"name" : "__idf_mcp2515",
 					"projectIndex" : 1
 				},
 				{
@@ -2207,9 +2231,9 @@
 					"projectIndex" : 1
 				},
 				{
-					"directoryIndex" : 97,
+					"directoryIndex" : 98,
 					"id" : "__idf_src::@2478b13de56d3028f688",
-					"jsonFile" : "target-__idf_src-419cc3417bbef6776698.json",
+					"jsonFile" : "target-__idf_src-fae035265ee3a8d961a7.json",
 					"name" : "__idf_src",
 					"projectIndex" : 1
 				},
@@ -2258,7 +2282,7 @@
 				{
 					"directoryIndex" : 93,
 					"id" : "__idf_wifi_provisioning::@9d7e7ffe1b15746c1098",
-					"jsonFile" : "target-__idf_wifi_provisioning-58c0cdb6984d21a31d92.json",
+					"jsonFile" : "target-__idf_wifi_provisioning-8f10db669018a58bc1f7.json",
 					"name" : "__idf_wifi_provisioning",
 					"projectIndex" : 1
 				},
@@ -2279,7 +2303,7 @@
 				{
 					"directoryIndex" : 24,
 					"id" : "__ldgen_output_sections.ld::@874df54e61e20112dfd4",
-					"jsonFile" : "target-__ldgen_output_sections.ld-f1686d647e6b80bcf02a.json",
+					"jsonFile" : "target-__ldgen_output_sections.ld-dfdc1add1ab2693bf6f7.json",
 					"name" : "__ldgen_output_sections.ld",
 					"projectIndex" : 1
 				},

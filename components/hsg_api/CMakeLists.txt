@@ -12,6 +12,7 @@ idf_component_register(
         cJSON
         app_update
         hsg_outputs
+        mqtt
 )
 # Embed your HTML file as binary
 target_add_binary_data(${COMPONENT_TARGET} "ESP32-POE.html" TEXT)

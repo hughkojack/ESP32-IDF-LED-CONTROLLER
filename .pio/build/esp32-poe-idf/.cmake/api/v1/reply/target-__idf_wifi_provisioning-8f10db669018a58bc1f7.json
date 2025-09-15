@@ -3,7 +3,7 @@
 	"artifacts" : 
 	[
 		{
-			"path" : "esp-idf/hsg_api/libhsg_api.a"
+			"path" : "esp-idf/wifi_provisioning/libwifi_provisioning.a"
 		}
 	],
 	"backtrace" : 2,
@@ -17,7 +17,7 @@
 			"__component_set_dependencies",
 			"__component_set_all_dependencies",
 			"add_compile_options",
-			"add_cxx_compile_options",
+			"add_c_compile_options",
 			"include_directories",
 			"target_include_directories",
 			"__component_add_include_dirs"
@@ -25,7 +25,7 @@
 		"files" : 
 		[
 			"C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/tools/cmake/component.cmake",
-			"components/hsg_api/CMakeLists.txt",
+			"C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/wifi_provisioning/CMakeLists.txt",
 			"C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/tools/cmake/utilities.cmake"
 		],
 		"nodes" : 
@@ -36,7 +36,7 @@
 			{
 				"command" : 1,
 				"file" : 1,
-				"line" : 1,
+				"line" : 21,
 				"parent" : 0
 			},
 			{
@@ -64,6 +64,24 @@
 				"parent" : 4
 			},
 			{
+				"command" : 3,
+				"file" : 0,
+				"line" : 351,
+				"parent" : 3
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 330,
+				"parent" : 6
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 330,
+				"parent" : 6
+			},
+			{
 				"command" : 5,
 				"file" : 0,
 				"line" : 456,
@@ -72,32 +90,20 @@
 			{
 				"command" : 6,
 				"file" : 0,
-				"line" : 458,
+				"line" : 457,
 				"parent" : 1
 			},
 			{
 				"command" : 5,
 				"file" : 2,
-				"line" : 271,
-				"parent" : 7
+				"line" : 282,
+				"parent" : 10
 			},
 			{
 				"command" : 5,
 				"file" : 0,
 				"line" : 467,
 				"parent" : 1
-			},
-			{
-				"command" : 2,
-				"file" : 0,
-				"line" : 333,
-				"parent" : 4
-			},
-			{
-				"command" : 2,
-				"file" : 0,
-				"line" : 333,
-				"parent" : 4
 			},
 			{
 				"command" : 7,
@@ -115,13 +121,37 @@
 				"command" : 8,
 				"file" : 0,
 				"line" : 309,
-				"parent" : 13
+				"parent" : 14
+			},
+			{
+				"command" : 9,
+				"file" : 0,
+				"line" : 481,
+				"parent" : 1
+			},
+			{
+				"command" : 8,
+				"file" : 0,
+				"line" : 309,
+				"parent" : 16
+			},
+			{
+				"command" : 8,
+				"file" : 0,
+				"line" : 309,
+				"parent" : 16
+			},
+			{
+				"command" : 8,
+				"file" : 0,
+				"line" : 309,
+				"parent" : 16
 			},
 			{
 				"command" : 2,
 				"file" : 0,
-				"line" : 333,
-				"parent" : 4
+				"line" : 330,
+				"parent" : 6
 			}
 		]
 	},
@@ -134,126 +164,130 @@
 					"fragment" : "-mlongcalls -Wno-frame-address   "
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-ffunction-sections"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-fdata-sections"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-Wall"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-Werror=all"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-Wno-error=unused-function"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-Wno-error=unused-variable"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-Wno-error=deprecated-declarations"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-Wextra"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-Wno-unused-parameter"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-Wno-sign-compare"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-ggdb"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-Og"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-fmacro-prefix-map=C:/Dev/LED-Controller=."
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-fmacro-prefix-map=C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623=IDF"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-fstrict-volatile-bitfields"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-Wno-error=unused-but-set-variable"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-fno-jump-tables"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 9,
 					"fragment" : "-fno-tree-switch-conversion"
 				},
 				{
-					"backtrace" : 8,
-					"fragment" : "-std=gnu++11"
+					"backtrace" : 11,
+					"fragment" : "-std=gnu99"
 				},
 				{
-					"backtrace" : 8,
-					"fragment" : "-fno-exceptions"
+					"backtrace" : 11,
+					"fragment" : "-Wno-old-style-declaration"
 				},
 				{
-					"backtrace" : 8,
-					"fragment" : "-fno-rtti"
-				},
-				{
-					"backtrace" : 9,
+					"backtrace" : 12,
 					"fragment" : "-D_GNU_SOURCE"
 				},
 				{
-					"backtrace" : 9,
+					"backtrace" : 12,
 					"fragment" : "-DIDF_VER=\\\"4.4.5\\\""
 				},
 				{
-					"backtrace" : 9,
+					"backtrace" : 12,
 					"fragment" : "-DESP_PLATFORM"
 				},
 				{
-					"backtrace" : 9,
+					"backtrace" : 12,
 					"fragment" : "-D_POSIX_READER_WRITER_LOCKS"
 				}
 			],
 			"defines" : 
 			[
 				{
-					"backtrace" : 10,
-					"define" : "HAVE_CONFIG_H"
-				},
-				{
-					"backtrace" : 11,
+					"backtrace" : 5,
 					"define" : "MBEDTLS_CONFIG_FILE=\"mbedtls/esp_config.h\""
 				}
 			],
 			"includes" : 
 			[
 				{
-					"backtrace" : 12,
+					"backtrace" : 13,
 					"path" : "C:/Dev/LED-Controller/.pio/build/esp32-poe-idf/config"
 				},
 				{
-					"backtrace" : 14,
-					"path" : "C:/Dev/LED-Controller/components/hsg_api/include"
+					"backtrace" : 15,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/wifi_provisioning/include"
+				},
+				{
+					"backtrace" : 17,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/wifi_provisioning/src"
+				},
+				{
+					"backtrace" : 18,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/wifi_provisioning/proto-c"
+				},
+				{
+					"backtrace" : 19,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/protocomm/proto-c"
 				},
 				{
 					"backtrace" : 2,
@@ -456,54 +490,66 @@
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_timer/include"
 				},
 				{
-					"backtrace" : 10,
-					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_http_server/include"
-				},
-				{
-					"backtrace" : 10,
-					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/nghttp/port/include"
-				},
-				{
-					"backtrace" : 10,
-					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/nghttp/nghttp2/lib/includes"
-				},
-				{
-					"backtrace" : 11,
-					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/nvs_flash/include"
-				},
-				{
-					"backtrace" : 11,
-					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/spi_flash/include"
-				},
-				{
-					"backtrace" : 11,
-					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mbedtls/port/include"
-				},
-				{
-					"backtrace" : 11,
-					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mbedtls/mbedtls/include"
-				},
-				{
-					"backtrace" : 11,
-					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mbedtls/esp_crt_bundle/include"
+					"backtrace" : 5,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/protocomm/include/common"
 				},
 				{
 					"backtrace" : 5,
-					"path" : "C:/Dev/LED-Controller/components/cJSON"
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/protocomm/include/security"
 				},
 				{
-					"backtrace" : 15,
-					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/app_update/include"
+					"backtrace" : 5,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/protocomm/include/transports"
 				},
 				{
-					"backtrace" : 15,
-					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/bootloader_support/include"
+					"backtrace" : 5,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/nvs_flash/include"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/spi_flash/include"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mbedtls/port/include"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mbedtls/mbedtls/include"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mbedtls/esp_crt_bundle/include"
+				},
+				{
+					"backtrace" : 20,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/protobuf-c/protobuf-c"
+				},
+				{
+					"backtrace" : 7,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mdns/include"
+				},
+				{
+					"backtrace" : 7,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/console"
+				},
+				{
+					"backtrace" : 8,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/json/cJSON"
 				}
 			],
-			"language" : "CXX",
+			"language" : "C",
 			"sourceIndexes" : 
 			[
-				0
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8
 			]
 		}
 	],
@@ -515,16 +561,28 @@
 		},
 		{
 			"backtrace" : 5,
-			"id" : "__idf_cJSON::@54b20bbd9ceb236203b8"
+			"id" : "__idf_protocomm::@d76d01c8dec06205e1fc"
+		},
+		{
+			"backtrace" : 5,
+			"id" : "__idf_protobuf-c::@b14513c4bd859268ec22"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "__idf_mdns::@2f076c6da9dadb273cdc"
+		},
+		{
+			"backtrace" : 8,
+			"id" : "__idf_json::@c78a8bdc820334f01148"
 		}
 	],
-	"id" : "__idf_hsg_api::@5e692ccf9019b1b8a2bd",
-	"name" : "__idf_hsg_api",
-	"nameOnDisk" : "libhsg_api.a",
+	"id" : "__idf_wifi_provisioning::@9d7e7ffe1b15746c1098",
+	"name" : "__idf_wifi_provisioning",
+	"nameOnDisk" : "libwifi_provisioning.a",
 	"paths" : 
 	{
-		"build" : "esp-idf/hsg_api",
-		"source" : "components/hsg_api"
+		"build" : "esp-idf/wifi_provisioning",
+		"source" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/wifi_provisioning"
 	},
 	"sourceGroups" : 
 	[
@@ -532,7 +590,15 @@
 			"name" : "Source Files",
 			"sourceIndexes" : 
 			[
-				0
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8
 			]
 		}
 	],
@@ -541,7 +607,55 @@
 		{
 			"backtrace" : 2,
 			"compileGroupIndex" : 0,
-			"path" : "components/hsg_api/HSG-API.cpp",
+			"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/wifi_provisioning/src/wifi_config.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/wifi_provisioning/src/wifi_scan.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/wifi_provisioning/src/manager.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/wifi_provisioning/src/handlers.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/wifi_provisioning/src/scheme_console.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/wifi_provisioning/proto-c/wifi_config.pb-c.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/wifi_provisioning/proto-c/wifi_scan.pb-c.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/wifi_provisioning/proto-c/wifi_constants.pb-c.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/wifi_provisioning/src/scheme_softap.c",
 			"sourceGroupIndex" : 0
 		}
 	],
