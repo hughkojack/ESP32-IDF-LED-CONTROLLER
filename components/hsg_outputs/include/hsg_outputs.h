@@ -1,14 +1,15 @@
 #pragma once
 #include "esp_err.h"
 #include "driver/i2c.h"
+#include "cJSON.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Initialize the output manager (loads config from HSG-API)
-esp_err_t hsg_outputs_init(i2c_port_t port);
-void hsg_outputs_reload_config();
+// The init and reload functions now take the config as a parameter
+esp_err_t hsg_outputs_init(int i2c_port, cJSON* config_json);
+esp_err_t hsg_outputs_reload_config(cJSON* config_json);
 
 // Set a single logical output to brightness/fade
 esp_err_t hsg_outputs_set(int out, int brightness, int fade_ms);

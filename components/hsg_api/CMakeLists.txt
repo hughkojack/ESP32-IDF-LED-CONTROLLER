@@ -5,14 +5,12 @@ idf_component_register(
         "include"
     REQUIRES
         esp_http_server
-        esp_netif
         nvs_flash
-        driver
-        freertos
         cJSON
         app_update
-        hsg_outputs
         mqtt
+        driver
+        esp_netif 
 )
 # Embed your HTML file as binary
 target_add_binary_data(${COMPONENT_TARGET} "ESP32-POE.html" TEXT)

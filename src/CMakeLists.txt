@@ -4,18 +4,18 @@ idf_component_register(
         "main.cpp"
     INCLUDE_DIRS
         "."
-    REQUIRES
-        esp32-mcp2515    # CAN bus driver
-        driver           # GPIO, I2C, SPI, etc.
-        freertos
-        esp_event        # event loop used by Wi-Fi
+    PRIV_REQUIRES
+        hsg_api
+        hsg_outputs
+        esp32-mcp2515
+        mqtt
+        driver
         esp_wifi
         esp_netif
         esp_http_server
         nvs_flash
         esp_eth
-        cJSON          # private dependency (not exposed to other components
-        hsg_api
-        hsg_outputs
-            
+        cJSON
+        freertos
+        esp_event
 )

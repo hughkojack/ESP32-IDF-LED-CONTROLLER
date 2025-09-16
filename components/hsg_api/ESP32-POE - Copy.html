@@ -48,7 +48,7 @@
             <button class="tab-button active py-2 px-4 rounded-md text-sm font-medium" data-target="deviceInfoSection">Device Info</button>
             <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="i2cMappingSection">I2C Mapping</button>
             <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="groupConfigSection">Groups</button>
-            <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="networkConfigSection">Network</button>
+            <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="mqttConfigSection">MQTT Config</button>
             <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="commandSection">Command</button>
             <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="advancedSection">Advanced</button>
         </div>
@@ -91,53 +91,40 @@
                 <button id="addGroupBtn" class="mt-4 text-sm bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md transition duration-300">Add Group</button>
             </div>
 
-            <div id="networkConfigSection" class="config-section hidden bg-gray-800 p-6 rounded-lg shadow-lg">
-                <div class="space-y-6">
+            <div id="mqttConfigSection" class="config-section hidden bg-gray-800 p-6 rounded-lg shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">MQTT Configuration</h2>
+                <div class="space-y-4">
                     <div>
-                        <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">Wi-Fi Credentials</h2>
-                        <div class="space-y-4">
-                            <div>
-                                <label for="wifiSsid" class="block text-sm font-medium text-gray-300">SSID</label>
-                                <input type="text" id="wifiSsid" placeholder="Your Wi-Fi network name" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                            </div>
-                            <div>
-                                <label for="wifiPassword" class="block text-sm font-medium text-gray-300">Password</label>
-                                <input type="password" id="wifiPassword" placeholder="Your Wi-Fi password" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                            </div>
-                        </div>
+                        <label for="mqttBroker" class="block text-sm font-medium text-gray-300">Broker</label>
+                        <input type="text" id="mqttBroker" placeholder="MQTT Broker IP or Hostname" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                     </div>
                     <div>
-                        <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">MQTT Configuration</h2>
-                        <div class="space-y-4">
-                            <div>
-                                <label for="mqttBroker" class="block text-sm font-medium text-gray-300">Broker</label>
-                                <input type="text" id="mqttBroker" placeholder="MQTT Broker IP or Hostname" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                            </div>
-                            <div>
-                                <label for="mqttPort" class="block text-sm font-medium text-gray-300">Port</label>
-                                <input type="number" id="mqttPort" placeholder="1883" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                            </div>
-                            <div>
-                                <label for="mqttTopicPrefix" class="block text-sm font-medium text-gray-300">Topic Prefix</label>
-                                <input type="text" id="mqttTopicPrefix" placeholder="e.g., HSG/ (slash is added automatically)" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                            </div>
-                            <div>
-                                <label for="mqttClientId" class="block text-sm font-medium text-gray-300">Client ID</label>
-                                <input type="text" id="mqttClientId" placeholder="Client ID (e.g., esp32-led)" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                            </div>
-                            <div>
-                                <label for="mqttUsername" class="block text-sm font-medium text-gray-300">Username (Optional)</label>
-                                <input type="text" id="mqttUsername" placeholder="Username" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                            </div>
-                            <div>
-                                <label for="mqttPassword" class="block text-sm font-medium text-gray-300">Password (Optional)</label>
-                                <input type="password" id="mqttPassword" placeholder="Password" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                            </div>
-                        </div>
+                        <label for="mqttPort" class="block text-sm font-medium text-gray-300">Port</label>
+                        <input type="number" id="mqttPort" placeholder="1883" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                     </div>
+                    <div>
+                        <label for="mqttTopicPrefix" class="block text-sm font-medium text-gray-300">Topic Prefix</label>
+                        <input type="text" id="mqttTopicPrefix" placeholder="e.g., HSG/" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div>
+                        <label for="mqttClientId" class="block text-sm font-medium text-gray-300">Client ID</label>
+                        <input type="text" id="mqttClientId" placeholder="Client ID (e.g., esp32-led)" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div>
+                        <label for="mqttUsername" class="block text-sm font-medium text-gray-300">Username (Optional)</label>
+                        <input type="text" id="mqttUsername" placeholder="Username" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div>
+                        <label for="mqttPassword" class="block text-sm font-medium text-gray-300">Password (Optional)</label>
+                        <input type="password" id="mqttPassword" placeholder="Password" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <button id="saveAllBtn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center">
+                        <span id="saveAllBtnText">Save All Configurations</span>
+                        <div id="saveAllSpinner" class="spinner hidden ml-2"></div>
+                    </button>
                 </div>
             </div>
-            
+
             <div id="commandSection" class="config-section hidden bg-gray-800 p-6 rounded-lg shadow-lg">
                 <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">Send Command</h2>
                 <div class="space-y-4">
@@ -189,10 +176,13 @@
     </div>
 
     <script>
-        // --- Get references to all the important HTML elements ---
+        // Get references to all the important HTML elements
+        const fetchSpinner = document.getElementById('fetchSpinner');
         const navTabs = document.getElementById('navTabs');
         const mainContent = document.getElementById('mainContent');
         const statusMessage = document.getElementById('statusMessage');
+
+        // Display elements
         const fwName = document.getElementById('fwName');
         const fwVersion = document.getElementById('fwVersion');
         const fwMaker = document.getElementById('fwMaker');
@@ -204,43 +194,54 @@
         const i2cMapping = document.getElementById('i2cMapping');
         const groupContainer = document.getElementById('groupContainer');
         const addGroupBtn = document.getElementById('addGroupBtn');
-        const wifiSsid = document.getElementById('wifiSsid');
-        const wifiPassword = document.getElementById('wifiPassword');
+
+        // MQTT input elements
         const mqttBroker = document.getElementById('mqttBroker');
         const mqttPort = document.getElementById('mqttPort');
         const mqttTopicPrefix = document.getElementById('mqttTopicPrefix');
         const mqttClientId = document.getElementById('mqttClientId');
         const mqttUsername = document.getElementById('mqttUsername');
         const mqttPassword = document.getElementById('mqttPassword');
+        const saveAllBtn = document.getElementById('saveAllBtn');
+        const saveAllBtnText = document.getElementById('saveAllBtnText');
+        const saveAllSpinner = document.getElementById('saveAllSpinner');
+
+        // Command elements
         const commandTargetInput = document.getElementById('commandTargetInput');
         const commandValueInput = document.getElementById('commandValueInput');
         const fadeInput = document.getElementById('fadeInput');
         const sendCommandBtn = document.getElementById('sendCommandBtn');
         const sendCommandBtnText = document.getElementById('sendCommandBtnText');
         const sendCommandSpinner = document.getElementById('sendCommandSpinner');
+
+        // OTA elements
         const otaFile = document.getElementById('otaFile');
         const uploadFwBtn = document.getElementById('uploadFwBtn');
         const uploadBtnText = document.getElementById('uploadBtnText');
         const uploadSpinner = document.getElementById('uploadSpinner');
+
+        // Action elements
         const restartBtn = document.getElementById('restartBtn');
         const restartBtnText = document.getElementById('restartBtnText');
         const restartSpinner = document.getElementById('restartSpinner');
 
-        // Reusable HTML template for the save button
-        const saveButtonTemplate = `
-            <div class="mt-8 bg-gray-800 p-6 rounded-lg shadow-lg border-t border-gray-700">
-                <button class="save-button w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center">
-                    <span class="save-button-text">Save All Configurations</span>
-                    <div class="save-button-spinner spinner hidden ml-2"></div>
-                </button>
-            </div>
-        `;
-
         // --- Event Listeners ---
+        // Save all configs when the button is clicked
+        saveAllBtn.addEventListener('click', saveAllConfigs);
+
+        // Add group when button is clicked
         addGroupBtn.addEventListener('click', () => addGroup());
+        
+        // Send command when the button is clicked
         sendCommandBtn.addEventListener('click', sendCommand);
+
+        // Upload firmware when the button is clicked
         uploadFwBtn.addEventListener('click', uploadFirmware);
+
+        // Restart device when the button is clicked
         restartBtn.addEventListener('click', restartDevice);
+        
+        // Handle tab clicks
         navTabs.addEventListener('click', (event) => {
             if (event.target.classList.contains('tab-button')) {
                 handleTabClick(event.target);
@@ -250,74 +251,108 @@
 
         // --- Functions ---
 
+        /**
+         * Handles clicking on a navigation tab
+         * @param {HTMLElement} clickedTab - The tab that was clicked
+         */
         function handleTabClick(clickedTab) {
-            navTabs.querySelectorAll('.tab-button').forEach(button => button.classList.remove('active'));
+            // Update active state for buttons
+            navTabs.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
             clickedTab.classList.add('active');
+
+            // Show/hide content sections
             const targetId = clickedTab.dataset.target;
             mainContent.querySelectorAll('.config-section').forEach(section => {
-                section.id === targetId ? section.classList.remove('hidden') : section.classList.add('hidden');
+                if (section.id === targetId) {
+                    section.classList.remove('hidden');
+                } else {
+                    section.classList.add('hidden');
+                }
             });
         }
 
+        /**
+         * Fetches adoption and configuration data from the device
+         */
         async function fetchData() {
+            console.log("fetchData() called"); 
+
             showStatus('Connecting to device...', 'loading');
             mainContent.classList.add('hidden');
             navTabs.classList.add('hidden');
+
             try {
-                const [adoptResponse, configResponse] = await Promise.all([
+                // Fetch all data points simultaneously
+                const [adoptResponse, configResponse, mqttResponse] = await Promise.all([
                     fetch(`/api/adopt`),
-                    fetch(`/api/config`)
+                    fetch(`/api/config`),
+                    fetch(`/api/mqtt`)
                 ]);
-                if (!adoptResponse.ok || !configResponse.ok) throw new Error(`HTTP error!`);
+
+                if (!adoptResponse.ok || !configResponse.ok || !mqttResponse.ok) {
+                    throw new Error(`HTTP error! Failed to fetch data.`);
+                }
+
                 const adoptData = await adoptResponse.json();
                 const configData = await configResponse.json();
-                populateUI({ ...adoptData, config: configData });
+                const mqttData = await mqttResponse.json();
 
-                // Add save buttons to the relevant sections
-                document.getElementById('i2cMappingSection').insertAdjacentHTML('beforeend', saveButtonTemplate);
-                document.getElementById('groupConfigSection').insertAdjacentHTML('beforeend', saveButtonTemplate);
-                document.getElementById('networkConfigSection').insertAdjacentHTML('beforeend', saveButtonTemplate);
-                
-                // Add event listeners to ALL the new save buttons
-                document.querySelectorAll('.save-button').forEach(button => {
-                    button.addEventListener('click', saveAllConfigs);
-                });
+                // Merge the results, giving precedence to more specific configs
+                const combinedData = { ...adoptData, config: { ...configData, ...mqttData } };
 
+                populateUI(combinedData);
                 showStatus('Successfully connected to device.', 'success');
                 mainContent.classList.remove('hidden');
                 navTabs.classList.remove('hidden');
-                handleTabClick(navTabs.querySelector('.tab-button.active'));
+                handleTabClick(navTabs.querySelector('.tab-button.active')); // Show default tab
             } catch (error) {
                 console.error('Fetch error:', error);
-                showStatus(`Failed to connect to device. Check connection and refresh.`, 'error');
+                showStatus(`Failed to connect to device at ${ip}. Check the IP and connection.`, 'error');
             }
         }
 
+        /**
+         * Populates the UI with data fetched from the device
+         * @param {object} data - The JSON data from the /adopt endpoint
+         */
         function populateUI(data) {
+            // Firmware Info
             fwName.textContent = data.firmware?.name || '-';
             fwVersion.textContent = data.firmware?.version || 'N/A';
             fwMaker.textContent = data.firmware?.maker || '-';
+
+            // Network Info
             netMode.textContent = data.network?.mode || '-';
             netIp.textContent = data.network?.ip || '-';
             netMac.textContent = data.network?.mac || '-';
+
+            // System Info
             sysHeap.textContent = data.system?.heapFreeBytes || '-';
             sysSketch.textContent = data.system?.sketchSpaceUsedBytes || '-';
 
-            i2cMapping.innerHTML = '';
-            if (data.i2c?.pca9685?.length > 0) {
+            // I2C Mapping
+            i2cMapping.innerHTML = ''; // Clear previous content
+            if (data.i2c && data.i2c.pca9685 && data.i2c.pca9685.length > 0) {
+                console.log("I2C length:", data.i2c.pca9685.length);
                 data.i2c.pca9685.forEach(addr => {
-                    const hexAddr = `0x${addr.toString(16)}`;
                     const deviceContainer = document.createElement('div');
+                    const hexAddr = `0x${addr.toString(16)}`;
                     deviceContainer.innerHTML = `<h3 class="font-bold text-indigo-400 mb-2">PCA9685 at ${hexAddr}</h3>`;
+                    
                     const grid = document.createElement('div');
                     grid.className = 'grid grid-cols-4 md:grid-cols-8 gap-2';
+
                     for (let i = 0; i < 16; i++) {
-                        grid.innerHTML += `
-                            <div class="flex items-center">
-                                <label for="pca-${addr}-${i}" class="text-xs mr-2">${i}:</label>
-                                <input type="number" id="pca-${addr}-${i}" data-addr="${addr}" data-port="${i}" 
-                                       class="w-full bg-gray-700 text-white rounded-md px-2 py-1 text-xs border border-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-500">
-                            </div>`;
+                        const inputContainer = document.createElement('div');
+                        inputContainer.className = 'flex items-center';
+                        inputContainer.innerHTML = `
+                            <label for="pca-${addr}-${i}" class="text-xs mr-2">${i}:</label>
+                            <input type="number" id="pca-${addr}-${i}" data-addr="${addr}" data-port="${i}" 
+                                   class="w-full bg-gray-700 text-white rounded-md px-2 py-1 text-xs border border-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                        `;
+                        grid.appendChild(inputContainer);
                     }
                     deviceContainer.appendChild(grid);
                     i2cMapping.appendChild(deviceContainer);
@@ -326,28 +361,36 @@
                 i2cMapping.innerHTML = '<p class="text-gray-400">No PCA9685 devices detected.</p>';
             }
 
+            // MQTT, I2C, and Group Config (if available in the response)
             if (data.config) {
-                if (data.config.wifi) {
-                    wifiSsid.value = data.config.wifi.ssid || '';
-                    wifiPassword.value = data.config.wifi.password || '';
+                mqttBroker.value = data.config.broker || '';
+                mqttPort.value = data.config.port || '';
+                mqttTopicPrefix.value = data.config.topicPrefix || 'HSG/';
+                
+                // If a clientId is saved, use it. Otherwise, generate the default from the MAC address.
+                if (data.config.clientId) {
+                    mqttClientId.value = data.config.clientId;
+                } else if (data.network && data.network.mac) {
+                    const macParts = data.network.mac.split(':');
+                    if (macParts.length === 6) {
+                        mqttClientId.value = macParts.slice(3).join('').toLowerCase();
+                    }
+                } else {
+                    mqttClientId.value = '';
                 }
+                
+                mqttUsername.value = data.config.username || '';
+                mqttPassword.value = data.config.password || '';
 
-                if (data.config.mqtt) {
-                    mqttBroker.value = data.config.mqtt.broker || '';
-                    mqttPort.value = data.config.mqtt.port || '';
-                    mqttTopicPrefix.value = data.config.mqtt.topicPrefix || '';
-                    mqttClientId.value = data.config.mqtt.clientId || (data.network?.mac ? data.network.mac.split(':').slice(3).join('').toLowerCase() : '');
-                    mqttUsername.value = data.config.mqtt.username || '';
-                    mqttPassword.value = data.config.mqtt.password || '';
-                }
-
-                if (data.config.i2c?.pca9685) {
+                if (data.config.i2c && data.config.i2c.pca9685) {
                     for (const [hexAddr, mappings] of Object.entries(data.config.i2c.pca9685)) {
                         const addr = parseInt(hexAddr.substring(2), 16);
                         if (Array.isArray(mappings)) {
                             mappings.forEach((mapValue, i) => {
                                 const input = document.getElementById(`pca-${addr}-${i}`);
-                                if (input) input.value = mapValue;
+                                if (input) {
+                                    input.value = mapValue;
+                                }
                             });
                         }
                     }
@@ -362,132 +405,198 @@
             }
         }
         
+        /**
+         * Adds a new group input row to the UI
+         * @param {string} name - Optional name for the group
+         * @param {Array<number>} outputs - Optional array of output numbers
+         */
         function addGroup(name = '', outputs = []) {
             const groupDiv = document.createElement('div');
             groupDiv.className = 'p-4 border border-gray-700 rounded-lg';
-            groupDiv.innerHTML = `
-                <div class="flex items-center gap-2 mb-4">
-                    <input type="text" value="${name}" placeholder="Group Name" class="group-name w-1/3 bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                    <button class="remove-group-btn bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md transition duration-300">-</button>
-                </div>`;
+            
+            const headerDiv = document.createElement('div');
+            headerDiv.className = 'flex items-center gap-2 mb-4';
+            headerDiv.innerHTML = `
+                <input type="text" value="${name}" placeholder="Group Name" class="group-name w-1/3 bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <button class="remove-group-btn bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md transition duration-300">-</button>
+            `;
+            groupDiv.appendChild(headerDiv);
+
             const availableOutputs = getAvailableOutputs();
             if (availableOutputs.length > 0) {
                 const checkboxGrid = document.createElement('div');
                 checkboxGrid.className = 'grid grid-cols-4 sm:grid-cols-8 md:grid-cols-12 gap-4';
                 availableOutputs.forEach(outputId => {
                     const isChecked = outputs.includes(outputId);
-                    checkboxGrid.innerHTML += `
-                        <label class="group-output-label text-xs">
-                            <span>${outputId}</span>
-                            <input type="checkbox" value="${outputId}" class="group-output-checkbox mt-1" ${isChecked ? 'checked' : ''}>
-                        </label>`;
+                    const label = document.createElement('label');
+                    label.className = 'group-output-label text-xs';
+                    label.innerHTML = `
+                        <span>${outputId}</span>
+                        <input type="checkbox" value="${outputId}" class="group-output-checkbox mt-1" ${isChecked ? 'checked' : ''}>
+                    `;
+                    checkboxGrid.appendChild(label);
                 });
                 groupDiv.appendChild(checkboxGrid);
             } else {
                 groupDiv.innerHTML += '<p class="text-sm text-gray-400">No logical outputs defined in I2C Mapping tab.</p>';
             }
+
             groupContainer.appendChild(groupDiv);
-            groupDiv.querySelector('.remove-group-btn').addEventListener('click', () => groupDiv.remove());
+
+            groupDiv.querySelector('.remove-group-btn').addEventListener('click', () => {
+                groupDiv.remove();
+            });
         }
         
+        /**
+         * Gets a list of all defined logical outputs from the I2C mapping tab
+         * @returns {Array<number>} A sorted array of unique output numbers
+         */
         function getAvailableOutputs() {
             const outputs = new Set();
             i2cMapping.querySelectorAll('input[type="number"]').forEach(input => {
                 const value = parseInt(input.value);
-                if (!isNaN(value) && value > 0) outputs.add(value);
+                if (!isNaN(value) && value > 0) {
+                    outputs.add(value);
+                }
             });
             return Array.from(outputs).sort((a, b) => a - b);
         }
 
-        async function saveAllConfigs(event) {
-            const clickedButton = event.currentTarget;
-            const textEl = clickedButton.querySelector('.save-button-text');
-            const spinnerEl = clickedButton.querySelector('.save-button-spinner');
-
-            let topicPrefix = mqttTopicPrefix.value.trim();
-            if (topicPrefix && !topicPrefix.endsWith('/')) {
-                topicPrefix += '/';
-            }
-
-            const configToSave = {
-                wifi: {
-                    ssid: wifiSsid.value.trim(),
-                    password: wifiPassword.value
-                },
-                mqtt: {
-                    broker: mqttBroker.value.trim(),
-                    port: parseInt(mqttPort.value, 10) || 1883,
-                    topicPrefix: topicPrefix,
-                    clientId: mqttClientId.value.trim(),
-                    username: mqttUsername.value.trim(),
-                    password: mqttPassword.value
-                },
+        /**
+         * Gathers all configurations from the UI and saves them to the device
+         */
+        async function saveAllConfigs() {
+            const mqttConfig = {
+                broker: mqttBroker.value.trim(),
+                port: parseInt(mqttPort.value, 10) || 1883,
+                topicPrefix: mqttTopicPrefix.value.trim(),
+                clientId: mqttClientId.value.trim(),
+                username: mqttUsername.value.trim(),
+                password: mqttPassword.value
+            };
+            
+            const otherConfig = {
                 i2c: getI2cMappingFromUi(),
                 groups: getGroupsFromUi()
             };
 
-            setLoadingState(clickedButton, textEl, spinnerEl, true);
+            setLoadingState(saveAllBtn, saveAllBtnText, saveAllSpinner, true);
             showStatus('Saving all configurations...', 'loading');
+
             try {
-                const response = await fetch(`/api/config`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(configToSave)
-                });
-                if (!response.ok) throw new Error(`HTTP error!`);
-                showStatus('Configurations saved successfully! Restart device to apply network changes.', 'success');
+                // Save MQTT and other configs in parallel
+                const [mqttResponse, configResponse] = await Promise.all([
+                    fetch(`/api/mqtt`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(mqttConfig)
+                    }),
+                    fetch(`/api/config`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(otherConfig)
+                    })
+                ]);
+
+                if (!mqttResponse.ok || !configResponse.ok) {
+                    throw new Error(`HTTP error! Failed to save one or more configurations.`);
+                }
+                showStatus('Configurations saved successfully! The device may restart.', 'success');
             } catch (error) {
                 console.error('Save error:', error);
                 showStatus('Failed to save configurations.', 'error');
             } finally {
-                setLoadingState(clickedButton, textEl, spinnerEl, false);
+                setLoadingState(saveAllBtn, saveAllBtnText, saveAllSpinner, false);
             }
         }
 
+        /**
+         * Gathers the I2C mapping from the UI and returns it as an object
+         */
         function getI2cMappingFromUi() {
             const i2cConfig = { pca9685: {} };
-            i2cMapping.querySelectorAll('input[type="number"]').forEach(input => {
+            const inputs = i2cMapping.querySelectorAll('input[type="number"]');
+            inputs.forEach(input => {
                 const addr = `0x${parseInt(input.dataset.addr).toString(16)}`;
                 const port = parseInt(input.dataset.port);
                 const value = parseInt(input.value) || 0;
-                if (!i2cConfig.pca9685[addr]) i2cConfig.pca9685[addr] = new Array(16).fill(0);
+
+                if (!i2cConfig.pca9685[addr]) {
+                    i2cConfig.pca9685[addr] = new Array(16).fill(0);
+                }
                 i2cConfig.pca9685[addr][port] = value;
             });
             return i2cConfig;
         }
 
+        /**
+         * Gathers the group definitions from the UI
+         */
         function getGroupsFromUi() {
             const groups = {};
             groupContainer.querySelectorAll('.p-4').forEach(groupDiv => {
                 const name = groupDiv.querySelector('.group-name').value.trim();
                 const outputs = [];
-                groupDiv.querySelectorAll('.group-output-checkbox:checked').forEach(checkbox => outputs.push(parseInt(checkbox.value)));
-                if (name && outputs.length > 0) groups[name] = outputs;
+                groupDiv.querySelectorAll('.group-output-checkbox:checked').forEach(checkbox => {
+                    outputs.push(parseInt(checkbox.value));
+                });
+                
+                if (name && outputs.length > 0) {
+                    groups[name] = outputs;
+                }
             });
             return groups;
         }
 
+        /**
+         * Sends a command to control an output or group
+         */
         async function sendCommand() {
             const target = commandTargetInput.value.trim();
             const value = commandValueInput.value.trim();
             const fadeValue = fadeInput.value.trim();
-            if (!target || !value) return showStatus('Please enter a target and a value.', 'error');
-            
+
+            if (!target || !value) {
+                showStatus('Please enter a target (output/group) and a value.', 'error');
+                return;
+            }
+
             let command = {};
-            isNaN(parseInt(target, 10)) ? command.group = target : command.output = parseInt(target, 10);
-            isNaN(parseInt(value, 10)) ? command.state = value.toUpperCase() : command.brightness = parseInt(value, 10);
-            if (fadeValue) command.fade = parseInt(fadeValue, 10);
+
+            // Check if the target is a number (output) or a string (group)
+            if (isNaN(parseInt(target, 10))) {
+                command.group = target;
+            } else {
+                command.output = parseInt(target, 10);
+            }
+
+            // Check if the value is a number (brightness) or a string (state)
+            if (isNaN(parseInt(value, 10))) {
+                command.state = value.toUpperCase();
+            } else {
+                command.brightness = parseInt(value, 10);
+            }
+
+            // Check for a fade value and add it to the command if it exists
+            if (fadeValue) {
+                command.fade = parseInt(fadeValue, 10);
+            }
 
             setLoadingState(sendCommandBtn, sendCommandBtnText, sendCommandSpinner, true);
-            showStatus(`Sending command...`, 'loading');
+            showStatus(`Sending command to ${target}...`, 'loading');
+
             try {
                 const response = await fetch(`/api/command`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(command)
                 });
-                if (!response.ok) throw new Error(`HTTP error!`);
-                showStatus(`Command sent successfully.`, 'success');
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                showStatus(`Command sent successfully to ${target}.`, 'success');
             } catch (error) {
                 console.error('Command error:', error);
                 showStatus('Failed to send command.', 'error');
@@ -496,38 +605,72 @@
             }
         }
 
+
+        /**
+         * Uploads the selected firmware file to the device
+         */
         async function uploadFirmware() {
+            const ip = deviceIpInput.value.trim();
             const file = otaFile.files[0];
-            if (!file) return showStatus('Please select a firmware (.bin) file.', 'error');
+
+            if (!ip) {
+                showStatus('Cannot upload. No device IP specified.', 'error');
+                return;
+            }
+            if (!file) {
+                showStatus('Please select a firmware (.bin) file to upload.', 'error');
+                return;
+            }
+
             setLoadingState(uploadFwBtn, uploadBtnText, uploadSpinner, true);
             showStatus(`Uploading ${file.name}...`, 'loading');
+
             try {
                 const response = await fetch(`/api/ota`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/octet-stream' },
                     body: file
                 });
-                if (!response.ok) throw new Error(`HTTP error!`);
-                showStatus('Upload successful! Device will reboot.', 'success');
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                showStatus('Firmware upload successful! The device will now reboot.', 'success');
             } catch (error) {
                 console.error('Upload error:', error);
-                showStatus('Firmware upload failed.', 'error');
+                showStatus('Firmware upload failed. Check console for details.', 'error');
             } finally {
                 setLoadingState(uploadFwBtn, uploadBtnText, uploadSpinner, false);
             }
         }
 
+        /**
+         * Sends the restart command to the device
+         */
         async function restartDevice() {
+            const ip = deviceIpInput.value.trim();
+            if (!ip) {
+                showStatus('Cannot restart. No device IP specified.', 'error');
+                return;
+            }
+
+            const command = { restart: true };
+
             setLoadingState(restartBtn, restartBtnText, restartSpinner, true);
             showStatus('Sending restart command...', 'loading');
+
             try {
+                // CORRECTED URL: Added /api/ prefix
                 const response = await fetch(`/api/command`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ restart: true })
+                    body: JSON.stringify(command)
                 });
-                if (!response.ok) throw new Error(`HTTP error!`);
-                showStatus('Restart command sent. Device will reboot.', 'success');
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                showStatus('Restart command sent successfully. The device will now reboot.', 'success');
             } catch (error) {
                 console.error('Restart error:', error);
                 showStatus('Failed to send restart command.', 'error');
@@ -536,20 +679,50 @@
             }
         }
 
+        /**
+         * Displays a status message to the user
+         * @param {string} message - The message to display
+         * @param {'success'|'error'|'loading'} type - The type of message
+         */
         function showStatus(message, type) {
             statusMessage.textContent = message;
-            statusMessage.className = 'mt-8 text-center text-sm '; // Reset classes
-            const typeClasses = { success: 'text-green-400', error: 'text-red-400', loading: 'text-yellow-400' };
-            statusMessage.classList.add(typeClasses[type] || 'text-gray-400');
+            statusMessage.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400');
+            switch (type) {
+                case 'success':
+                    statusMessage.classList.add('text-green-400');
+                    break;
+                case 'error':
+                    statusMessage.classList.add('text-red-400');
+                    break;
+                case 'loading':
+                    statusMessage.classList.add('text-yellow-400');
+                    break;
+            }
         }
         
+        /**
+         * Toggles the loading state of a button (shows/hides spinner)
+         * @param {HTMLElement} button - The button element
+         * @param {HTMLElement} textEl - The text span inside the button
+         * @param {HTMLElement} spinnerEl - The spinner div inside the button
+         * @param {boolean} isLoading - True to show spinner, false to hide
+         */
         function setLoadingState(button, textEl, spinnerEl, isLoading) {
-            button.disabled = isLoading;
-            textEl.classList.toggle('hidden', isLoading);
-            spinnerEl.classList.toggle('hidden', !isLoading);
+            if (isLoading) {
+                button.disabled = true;
+                textEl.classList.add('hidden');
+                spinnerEl.classList.remove('hidden');
+            } else {
+                button.disabled = false;
+                textEl.classList.remove('hidden');
+                spinnerEl.classList.add('hidden');
+            }
         }
-        
-        window.onload = fetchData;
+        // Run automatically on load
+        window.onload = () => {
+            console.log("Page loaded, calling fetchData()");
+            fetchData();
+        };
     </script>
 </body>
 </html>

@@ -1,125 +1,84 @@
 #include "hsg_outputs.h"
-#include "HSG-API.h"
-#include "cJSON.h"
+#include "hsg_pca9685.h"
 #include "esp_log.h"
-#include <map>
+#include <vector>
 #include <string>
 
 static const char* TAG = "HSG-OUTPUTS";
 
-// This struct holds the physical location of a logical output
-struct OutputMap {
-    uint8_t addr;
+struct OutputMapping {
+    int logical_output;
+    uint8_t i2c_addr;
     uint8_t channel;
 };
 
-static std::map<int, OutputMap> g_output_map;
-static cJSON* g_cfg = nullptr;
+static std::vector<OutputMapping> g_mappings;
+static int g_i2c_port = 0;
 
-// -----------------------------------------------------------------------------
-// Helper: Rebuilds the internal mapping from the configuration JSON
-// -----------------------------------------------------------------------------
-static void rebuild_output_map(cJSON* cfg)
-{
-    g_output_map.clear();
-    if (!cfg) return;
+// This is the main logic that parses the config. It's now a helper function.
+static void parse_config(cJSON* config_json) {
+    g_mappings.clear();
 
-    cJSON* i2c = cJSON_GetObjectItem(cfg, "i2c");
+    if (!config_json) {
+        ESP_LOGE(TAG, "parse_config received a null JSON object.");
+        return;
+    }
+
+    cJSON* i2c = cJSON_GetObjectItem(config_json, "i2c");
     if (!i2c) return;
 
-    cJSON* pca = cJSON_GetObjectItem(i2c, "pca9685");
-    if (!pca) return;
+    cJSON* pca9685 = cJSON_GetObjectItem(i2c, "pca9685");
+    if (!pca9685) return;
 
-    cJSON* dev = nullptr;
-    cJSON_ArrayForEach(dev, pca) {
-        if (!dev->string || !cJSON_IsArray(dev)) continue;
-
-        uint8_t addr = strtol(dev->string, nullptr, 0);
-
-        int idx = 0;
-        cJSON* el = nullptr;
-        cJSON_ArrayForEach(el, dev) {
-            if (cJSON_IsNumber(el)) {
-                int out_num = el->valueint;
-                if (out_num > 0) {
-                    g_output_map[out_num] = { addr, (uint8_t)idx };
-                    ESP_LOGI(TAG, "Mapped OUT %d -> PCA9685@0x%02X ch%d",
-                             out_num, addr, idx);
-                }
+    // Iterate over each PCA9685 device address (e.g., "0x40", "0x41")
+    cJSON* device = NULL;
+    cJSON_ArrayForEach(device, pca9685) {
+        uint8_t addr = (uint8_t)strtol(device->string, NULL, 16);
+        int channel_index = 0;
+        cJSON* channel_map = NULL;
+        cJSON_ArrayForEach(channel_map, device) {
+            if (cJSON_IsNumber(channel_map) && channel_map->valueint > 0) {
+                g_mappings.push_back({channel_map->valueint, addr, (uint8_t)channel_index});
+                ESP_LOGI(TAG, "Mapped OUT %d -> PCA9685@0x%02X ch%d", channel_map->valueint, addr, channel_index);
             }
-            idx++;
+            channel_index++;
         }
     }
+    ESP_LOGI(TAG, "Outputs initialized (%d mapped)", g_mappings.size());
 }
 
-// -----------------------------------------------------------------------------
-// API: Initialize the outputs component and build the initial map
-// -----------------------------------------------------------------------------
-esp_err_t hsg_outputs_init(i2c_port_t port)
-{
-    if (g_cfg) {
-        cJSON_Delete(g_cfg);
-        g_cfg = nullptr;
-    }
 
-    g_cfg = HSG::API::get_config_json_obj();  // Get a copy of the stored config
-    if (!g_cfg) {
-        ESP_LOGW(TAG, "No config available, outputs not mapped");
-        return ESP_FAIL;
-    }
+// --- PUBLIC FUNCTIONS ---
 
-    cJSON* cfg = cJSON_GetObjectItem(g_cfg, "config");
-    if (!cfg) {
-        ESP_LOGW(TAG, "No 'config' object in JSON");
-        return ESP_FAIL;
+// Init now receives the config from main
+esp_err_t hsg_outputs_init(int i2c_port, cJSON* config_json) {
+    g_i2c_port = i2c_port;
+    if (!config_json) {
+        ESP_LOGE(TAG, "hsg_outputs_init called with null config!");
+        return ESP_ERR_INVALID_ARG;
     }
-
-    rebuild_output_map(cfg);
-    ESP_LOGI(TAG, "Outputs initialized (%zu mapped)", g_output_map.size());
+    parse_config(config_json);
     return ESP_OK;
 }
 
-// -----------------------------------------------------------------------------
-// API: Gets the physical mapping for a logical output number.
-// This is called by the animation engine in main.cpp.
-// -----------------------------------------------------------------------------
-bool hsg_outputs_get_mapping(int output, uint8_t *addr, uint8_t *channel)
-{
-    auto it = g_output_map.find(output);
-    if (it == g_output_map.end()) {
-        return false; // No mapping found for this output
+// Reload also receives the config from main
+esp_err_t hsg_outputs_reload_config(cJSON* config_json) {
+    ESP_LOGI(TAG, "Reloading outputs configuration...");
+     if (!config_json) {
+        ESP_LOGE(TAG, "hsg_outputs_reload_config called with null config!");
+        return ESP_ERR_INVALID_ARG;
     }
-
-    *addr = it->second.addr;
-    *channel = it->second.channel;
-    return true;
+    parse_config(config_json);
+    return ESP_OK;
 }
 
-
-// -----------------------------------------------------------------------------
-// API: Reloads the configuration if it has been updated via the web UI
-// -----------------------------------------------------------------------------
-void hsg_outputs_reload_config() {
-    if (g_cfg) {
-        cJSON_Delete(g_cfg);
-        g_cfg = nullptr;
+bool hsg_outputs_get_mapping(int output_num, uint8_t* addr, uint8_t* channel) {
+    for (const auto& map : g_mappings) {
+        if (map.logical_output == output_num) {
+            *addr = map.i2c_addr;
+            *channel = map.channel;
+            return true;
+        }
     }
-
-    g_cfg = HSG::API::get_config_json_obj();
-    if (!g_cfg) {
-        ESP_LOGW(TAG, "reload_config: Failed to reload config");
-        g_output_map.clear();
-        return;
-    }
-
-    cJSON* cfg = cJSON_GetObjectItem(g_cfg, "config");
-    if (!cfg) {
-        ESP_LOGW(TAG, "reload_config: No 'config' object");
-        g_output_map.clear();
-        return;
-    }
-
-    rebuild_output_map(cfg);
-    ESP_LOGI(TAG, "reload_config: Outputs rebuilt (%zu mapped)", g_output_map.size());
+    return false;
 }
-

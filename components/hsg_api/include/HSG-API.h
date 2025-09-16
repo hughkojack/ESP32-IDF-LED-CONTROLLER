@@ -4,6 +4,7 @@
 #include <string>
 #include "esp_http_server.h"
 #include "cJSON.h"
+#include "freertos/event_groups.h"
 
 // Minimal CAN frame (compatible with your MCP2515 struct)
 struct HSG_CanFrame {
@@ -12,8 +13,12 @@ struct HSG_CanFrame {
     uint8_t  data[8]{};
 };
 
+const int CONFIG_LOADED_BIT = BIT2;
+
 namespace HSG {
 namespace API {
+
+EventGroupHandle_t get_event_group();
 
 struct Init {
     int i2c_port = 0;                 // I2C_NUM_0 or I2C_NUM_1 (your I2C must be initialized by app)
@@ -26,6 +31,8 @@ struct Init {
     // group_cb(name, state["ON"/"OFF"], fade_ms)
     std::function<void(const char* name, const char* state, int fade_ms)> group_cb;
 
+    // NEW: Callback to notify main that config has been updated
+    std::function<void()> config_updated_cb;
 };
 
 esp_err_t register_uris(httpd_handle_t server, const Init& init);

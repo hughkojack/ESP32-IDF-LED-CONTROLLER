@@ -31,6 +31,7 @@ extern "C" {
 #include "esp_eth.h"
 #include "esp_eth_phy.h"
 #include "esp_eth_mac.h"
+#include "mqtt_client.h"
 
 #include "HSG-API.h"
 #include "hsg_outputs.h"
@@ -48,8 +49,19 @@ static const int ETH_CONNECTED_BIT = BIT0;
 static const int WIFI_CONNECTED_BIT = BIT1;
 static bool s_eth_connected = false;
 static bool s_wifi_connected = false;
+static esp_mqtt_client_handle_t mqtt_client;
 
-/* ---------------------- Global State for Fading ---------------------- */
+/* ---------------------- Global State for Commands and Fading ---------------------- */
+enum class TargetType { OUTPUT, GROUP };
+
+struct Command {
+    TargetType type = TargetType::OUTPUT;
+    int output_id = 0;
+    std::string group_name;
+    int brightness = 0;
+    int fade_ms = 0;
+};
+
 struct OutputState {
     int startPwmValue = 0;
     int currentPwmValue = 0;
@@ -105,13 +117,13 @@ static esp_err_t i2c_master_init(void);
 void main_task(void *pvParameter);
 void animation_task(void *pvParameter);
 static void IRAM_ATTR gpio_isr_handler(void* arg);
-static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
-static void ip_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
+//static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
+//static void ip_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
 static void wifi_start(void);
 static void eth_start(void);
+void setOutput(int output, int brightness, int fadeMs);
 
 
-//void setOutput(int output, int brightness, int fadeMs);
 void processFades();
 
 static void phy_power_set(bool on) {
@@ -176,6 +188,10 @@ static void net_event_handler(void* arg, esp_event_base_t event_base,
             ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
             ESP_LOGI(TAG, "Wi-Fi Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
             s_wifi_connected = true;
+            // If MQTT was disconnected due to network loss, reconnect it now
+            if (mqtt_client) {
+                esp_mqtt_client_reconnect(mqtt_client);
+            }
             // Signal that a network connection is active
             xEventGroupSetBits(s_net_event_group, WIFI_CONNECTED_BIT);
         }
@@ -235,22 +251,62 @@ static void wifi_start(void)
 {
     ESP_LOGI(TAG, "Ethernet failed or disconnected, starting Wi-Fi...");
     
+    // 1. Get the entire config object from your API
+    cJSON* config_json = HSG::API::get_config_json_obj();
+    if (!config_json) {
+        ESP_LOGE(TAG, "Failed to get config from NVS. Cannot start Wi-Fi.");
+        return;
+    }
+
+    // 2. Extract the 'wifi' section
+    cJSON* wifi_json = cJSON_GetObjectItem(config_json, "wifi");
+    if (!wifi_json) {
+        ESP_LOGW(TAG, "No 'wifi' section in config. Wi-Fi not started.");
+        cJSON_Delete(config_json);
+        return;
+    }
+    // FIX: Add a check for the "ssid" item
+    const cJSON* ssid_json = cJSON_GetObjectItem(wifi_json, "ssid");
+    if (!cJSON_IsString(ssid_json) || ssid_json->valuestring == NULL || strlen(ssid_json->valuestring) == 0) {
+        ESP_LOGW(TAG, "Wi-Fi SSID not configured or is empty. Wi-Fi not started.");
+        cJSON_Delete(config_json);
+        return;
+    }
+
+    // --- FIX: Add these log messages for verification ---
+    ESP_LOGI(TAG, "Found Wi-Fi credentials in NVS:");
+    ESP_LOGI(TAG, "  SSID: %s", ssid_json->valuestring);
+
+    const cJSON* pass_json = cJSON_GetObjectItem(wifi_json, "password");
+    if (cJSON_IsString(pass_json) && pass_json->valuestring != NULL && strlen(pass_json->valuestring) > 0) {
+        ESP_LOGI(TAG, "  Password: [***]"); // We log stars for security, not the actual password
+    } else {
+        ESP_LOGI(TAG, "  Password: [NONE]");
+    }
+    // --- END FIX ---
+
+    // 3. Configure Wi-Fi with credentials from NVS
+    wifi_config_t wifi_config = {};
+    strncpy((char*)wifi_config.sta.ssid, ssid_json->valuestring, sizeof(wifi_config.sta.ssid) - 1);
+    if (cJSON_IsString(pass_json) && pass_json->valuestring != NULL) {
+        strncpy((char*)wifi_config.sta.password, pass_json->valuestring, sizeof(wifi_config.sta.password) - 1);
+    }
+    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    
+    cJSON_Delete(config_json); // Clean up JSON object
+
     // Create Wi-Fi station interface if it doesn't exist
     if (esp_netif_get_handle_from_ifkey("WIFI_STA_DEF") == NULL) {
         esp_netif_create_default_wifi_sta();
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
         ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     }
-
-    // Set Wi-Fi configuration
-    wifi_config_t wifi_config = {};
-    strcpy((char*)wifi_config.sta.ssid, WIFI_SSID);
-    strcpy((char*)wifi_config.sta.password, WIFI_PASS);
-    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-
+    
+    // 4. Set config and start Wi-Fi
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_LOGI(TAG, "Wi-Fi configured to connect to SSID: %s", wifi_config.sta.ssid);
 }
 
 
@@ -319,6 +375,21 @@ static esp_err_t spi_master_init(void) {
 
 
 /*--------------------------- Fading and PWM Logic ---------------------------*/
+void processCommand(const Command& cmd) {
+    ESP_LOGI(TAG, "Processing command for %s: %s%d, brightness=%d, fade=%dms",
+             (cmd.type == TargetType::OUTPUT) ? "output" : "group",
+             (cmd.type == TargetType::OUTPUT) ? "" : cmd.group_name.c_str(),
+             cmd.output_id,
+             cmd.brightness,
+             cmd.fade_ms);
+
+    if (cmd.type == TargetType::OUTPUT) {
+        setOutput(cmd.output_id, cmd.brightness, cmd.fade_ms);
+    } else if (cmd.type == TargetType::GROUP) {
+        // TODO: Call your group handling function here
+        // For example: hsg_outputs_set_group(cmd.group_name.c_str(), cmd.brightness > 0 ? "ON" : "OFF", cmd.fade_ms);
+    }
+}
 
 void setOutput(int output, int brightness, int fadeMs) {
     int outputIndex = output - 1;
@@ -373,56 +444,68 @@ void processFades() {
 /*--------------------------- Main Application Entry Point --------------------*/
 extern "C" void app_main(void) {
     ESP_LOGI(TAG, "Starting up...");
-    // FIX: Create the event group before using it
+
+    // 1. Initialize NVS (must be first)
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+      ESP_ERROR_CHECK(nvs_flash_erase());
+      ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+
+    // 2. Initialize Networking
     s_net_event_group = xEventGroupCreate();
-
-    nvs_flash_init();
-
     initialize_network_interfaces();
     
     ESP_LOGI(TAG, "Waiting for network connection...");
-    xEventGroupWaitBits(s_net_event_group, WIFI_CONNECTED_BIT | ETH_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+    xEventGroupWaitBits(s_net_event_group, ETH_CONNECTED_BIT | WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
     ESP_LOGI(TAG, "Network connected.");
     
-    // 2) Initialize I2C driver
-    ESP_ERROR_CHECK(i2c_master_init());
-    ESP_LOGI(TAG, "I2C ready: SDA=%d SCL=%d @%dHz", I2C_MASTER_SDA_IO, I2C_MASTER_SCL_IO, I2C_MASTER_FREQ_HZ);
-
-    // ---- START SERVICE COMPONENTS ----
-
-    // 3) Initialize the outputs component (which loads the config from API)
-    ESP_ERROR_CHECK(hsg_outputs_init(I2C_MASTER_NUM));
-
-    // 4) Pass API init callbacks
+    // 3. Initialize the core API component
+    // This starts the web server and makes the config available
     HSG::API::Init api_init;
-    api_init.i2c_port = I2C_NUM_0;
+    api_init.i2c_port = I2C_MASTER_NUM;
     api_init.output_cb = [](int out, int brightness, int fade_ms){
         ESP_LOGI(TAG, "API received command for output %d, brightness %d, fade %dms", out, brightness, fade_ms);
-        // The API callback now triggers a fade request in our animation engine
-        setOutput(out, brightness, fade_ms);
+        Command cmd = {TargetType::OUTPUT, out, "", brightness, fade_ms};
+        processCommand(cmd);
     };
     api_init.group_cb = [](const char* name, const char* state, int fade_ms){
-        // hsg_outputs_set_group(name, state, fade_ms); // This can be implemented next
+        // Group handler logic
+    };
+    
+    api_init.config_updated_cb = [](){
+        ESP_LOGI(TAG, "Configuration updated, reloading outputs...");
+        cJSON* config = HSG::API::get_config_json_obj();
+        hsg_outputs_reload_config(config);
+        cJSON_Delete(config);
     };
 
-    // 5) Start web server and register API URIs
-    httpd_handle_t server = web_server_start();
-    if (server) {
-        ESP_ERROR_CHECK(HSG::API::register_uris(server, api_init));
-        ESP_LOGI(TAG, "HSG-API URIs registered successfully.");
-    } else {
-        ESP_LOGE(TAG, "HTTP server failed to start, API not registered.");
-    }
+    HSG::API::start(api_init);
+    HSG::API::mqtt_start();
 
-    HSG::API::mqtt_start();    // Starts the MQTT client
+    // 4. *** NEW: Wait for the API to confirm config is loaded ***
+    ESP_LOGI(TAG, "Waiting for HSG-API configuration to be loaded...");
+    xEventGroupWaitBits(HSG::API::get_event_group(), CONFIG_LOADED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+    ESP_LOGI(TAG, "HSG-API configuration is ready.");
 
+    // 5. Initialize Hardware Drivers and Dependent Components
+    ESP_ERROR_CHECK(i2c_master_init());
+    ESP_LOGI(TAG, "I2C ready: SDA=%d SCL=%d @%dHz", I2C_MASTER_SDA_IO, I2C_MASTER_SCL_IO, I2C_MASTER_FREQ_HZ);
+    
+    // 6. Init Outputs by PASSING the config to it
+    cJSON* initial_config = HSG::API::get_config_json_obj();
+    ESP_ERROR_CHECK(hsg_outputs_init(I2C_MASTER_NUM, initial_config));
+    cJSON_Delete(initial_config); // Clean up
+
+    // Now that the API has loaded the config, we can init the outputs
     HSG::API::scan_and_prune_i2c(I2C_MASTER_NUM);
 
-    // 6) Create the main task for real-time processing
-    xTaskCreate(main_task, "can_task", 4096, NULL, 5, NULL); // Task for CAN
-    xTaskCreate(animation_task, "animation_task", 4096, NULL, 5, NULL); // Task for lighting
+    // 7. Start Application Tasks
+    xTaskCreate(main_task, "can_task", 4096, NULL, 5, NULL);
+    xTaskCreate(animation_task, "animation_task", 4096, NULL, 5, NULL);
 
-    ESP_LOGI(TAG, "app_main() Initialization complete. Entering main loop.");
+    ESP_LOGI(TAG, "app_main() Initialization complete.");    
 }
 
 /*--------------------------- Main Application Task -------------------------*/
@@ -480,6 +563,20 @@ void main_task(void *pvParameter)
                 g_last_frame = can_frame;
                 xSemaphoreGive(g_last_mutex);
                 // TODO: Decode and process the CAN message
+                 if (can_frame.can_dlc < 5) continue;
+
+                // 1. Create a universal Command object
+                Command cmd;
+
+                // 2. Parse the CAN frame into the Command object
+                // Byte 0 is command type, we assume it's for an output for now
+                cmd.type = TargetType::OUTPUT;
+                cmd.output_id = can_frame.data[1]; // Target ID
+                cmd.brightness = can_frame.data[2]; // Value
+                cmd.fade_ms = (can_frame.data[4] << 8) | can_frame.data[3]; // Fade Duration
+
+                // 3. Call the unified command processor
+                processCommand(cmd);
             }
         }
     }

@@ -1,5 +1,5 @@
 #include "HSG-API.h"
-#include "hsg_outputs.h"
+//#include "hsg_outputs.h"
 #include "mqtt_client.h"
 
 #include <cstring>
@@ -16,6 +16,8 @@
 #include "nvs.h"
 #include "driver/i2c.h"
 #include "cJSON.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 
 static const char* TAG = "HSG-API";
 static const char* NVS_NS = "cfg";
@@ -198,43 +200,41 @@ static esp_err_t h_config_post(httpd_req_t* req) {
     auto body = req_read_all(req);
     ESP_LOGI(TAG, "Config POST body: %s", body.c_str());
 
-    cJSON* posted = cJSON_Parse(body.c_str());
-    if (!posted) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
-
-    cJSON* full = load_cfg_json();
-    ensure_layout(full);
-    cJSON* config = cJSON_GetObjectItem(full, "config");
-
-    // Replace i2c/groups if present
-    for (auto key : { "i2c", "groups" }) {
-        cJSON* v = cJSON_GetObjectItem(posted, key);
-        if (v) {
-            cJSON_DeleteItemFromObject(config, key);
-            cJSON_AddItemToObject(config, key, cJSON_Duplicate(v, 1));
-            ESP_LOGI(TAG, "Replaced config section: %s", key);
-        }
-    }
-    // Merge posted.config extras (e.g. mqtt) if present
-    if (auto* posted_cfg = cJSON_GetObjectItem(posted, "config"); posted_cfg) {
-        for (cJSON* ch = posted_cfg->child; ch; ch = ch->next) {
-            if (!cJSON_GetObjectItem(config, ch->string)) {
-                cJSON_AddItemToObject(config, ch->string, cJSON_Duplicate(ch, 1));
-                ESP_LOGI(TAG, "Added new config key: %s", ch->string);
-            }
-        }
+    cJSON* posted_config = cJSON_Parse(body.c_str());
+    if (!posted_config) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
     }
 
-    cJSON_Delete(posted);
-    ensure_layout(full);
-    char* merged = cJSON_PrintUnformatted(full);
-    ESP_LOGI(TAG, "Config merged: %s", merged);
-    if (merged) free(merged);
+    // Load the full existing configuration from NVS
+    cJSON* full_config_root = load_cfg_json();
+    ensure_layout(full_config_root);
+    cJSON* config_obj = cJSON_GetObjectItem(full_config_root, "config");
 
-    save_cfg_json(full);
-    // 🔄 Reload outputs with new config
-    hsg_outputs_reload_config();
+    // This loop iterates through all the keys in the posted JSON
+    // (wifi, mqtt, i2c, groups) and updates them in the main config.
+    for (cJSON* new_section = posted_config->child; new_section != NULL; new_section = new_section->next) {
+        // Remove the old section if it exists
+        if (cJSON_HasObjectItem(config_obj, new_section->string)) {
+            cJSON_DeleteItemFromObject(config_obj, new_section->string);
+        }
+        // Add the new (or updated) section
+        cJSON_AddItemToObject(config_obj, new_section->string, cJSON_Duplicate(new_section, 1));
+        ESP_LOGI(TAG, "Updated config section: %s", new_section->string);
+    }
 
-    cJSON_Delete(full);
+    // Save the newly merged configuration back to NVS
+    save_cfg_json(full_config_root);
+    cJSON_Delete(posted_config);
+    cJSON_Delete(full_config_root);
+
+    // Reload the output mapping in case it changed
+//    hsg_outputs_reload_config();
+
+    // NEW: Notify main that the config has changed
+    if (g_init.config_updated_cb) {
+        g_init.config_updated_cb();
+    }
+
     return httpd_resp_sendstr(req, "OK");
 }
 
@@ -249,6 +249,7 @@ static esp_err_t h_mqtt_get(httpd_req_t* req) {
 }
 
 // POST /api/mqtt
+/*
 static esp_err_t h_mqtt_post(httpd_req_t* req) {
     auto body = req_read_all(req);
     cJSON* posted = cJSON_Parse(body.c_str());
@@ -262,7 +263,7 @@ static esp_err_t h_mqtt_post(httpd_req_t* req) {
     save_cfg_json(full);
     cJSON_Delete(full);
     return httpd_resp_sendstr(req, "OK");
-}
+}*/
 
 // POST /api/command
 static esp_err_t h_command(httpd_req_t* req) {
@@ -344,6 +345,7 @@ static esp_err_t h_ota(httpd_req_t* req) {
     return ESP_OK;
 }
 
+EventGroupHandle_t g_event_group = nullptr;
 
 } // namespace (anon)
 
@@ -354,11 +356,19 @@ namespace API {
 
 cJSON* get_config_json_obj() {
     cJSON* root = load_cfg_json();   // already implemented in your file
+    ensure_layout(root); // Ensures the "config" key exists
     if (!root) {
         ESP_LOGW(TAG, "get_config_json_obj: no config in NVS");
         return nullptr;
     }
-    return root;  // caller must cJSON_Delete()
+    // We return a copy of the nested "config" object
+    cJSON* config_obj = cJSON_GetObjectItem(root, "config");
+    cJSON* config_copy = cJSON_Duplicate(config_obj, 1);
+    
+    cJSON_Delete(root);
+    return config_copy;
+
+    //return root;  // caller must cJSON_Delete()
 }
 
 esp_err_t register_uris(httpd_handle_t server, const Init& init) {
@@ -377,7 +387,7 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     httpd_uri_t config_get { .uri="/api/config",   .method=HTTP_GET,  .handler=h_config_get, .user_ctx=nullptr };
     httpd_uri_t config_post{ .uri="/api/config",   .method=HTTP_POST, .handler=h_config_post,.user_ctx=nullptr };
     httpd_uri_t mqtt_get   { .uri="/api/mqtt",     .method=HTTP_GET,  .handler=h_mqtt_get,   .user_ctx=nullptr };
-    httpd_uri_t mqtt_post  { .uri="/api/mqtt",     .method=HTTP_POST, .handler=h_mqtt_post,  .user_ctx=nullptr };
+//    httpd_uri_t mqtt_post  { .uri="/api/mqtt",     .method=HTTP_POST, .handler=h_mqtt_post,  .user_ctx=nullptr };
     httpd_uri_t cmd_post   { .uri="/api/command",  .method=HTTP_POST, .handler=h_command,    .user_ctx=nullptr };
     httpd_uri_t can_last   { .uri="/api/can/last", .method=HTTP_GET,  .handler=h_can_last,   .user_ctx=nullptr };
     httpd_uri_t ota_post   { .uri="/api/ota",      .method=HTTP_POST, .handler=h_ota,        .user_ctx=nullptr };
@@ -386,7 +396,7 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &config_get));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &config_post));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &mqtt_get));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &mqtt_post));
+//  ESP_ERROR_CHECK(httpd_register_uri_handler(server, &mqtt_post));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &cmd_post));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &can_last));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &ota_post));
@@ -446,15 +456,23 @@ static void prune_pca9685_config_to_detected(const std::vector<uint8_t>& detecte
     cJSON_Delete(config);
 }
 
+EventGroupHandle_t get_event_group() {
+    return g_event_group;
+}
+
 esp_err_t start(const Init& cfg) {
     g_init = cfg;
     if (!g_last_mutex) g_last_mutex = xSemaphoreCreateMutex();
+    if (!g_event_group) g_event_group = xEventGroupCreate(); // Create the event group
 
     // Ensure NVS is ready (idempotent)
     if (nvs_flash_init() != ESP_OK) {
         esp_err_t r = nvs_flash_erase();
         if (r == ESP_OK) nvs_flash_init();
     }
+
+    xEventGroupSetBits(g_event_group, CONFIG_LOADED_BIT);
+    ESP_LOGI(TAG, "Configuration loaded, signaling event group.");
 
     httpd_config_t conf = HTTPD_DEFAULT_CONFIG();
     conf.max_uri_handlers = 16;   // more routes
@@ -565,7 +583,35 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
 
                 std::string data(event->data, event->data_len);
                 ESP_LOGI(TAG, "MQTT Command received on topic %s: %s", g_mqtt_command_topic.c_str(), data.c_str());
-                // TODO: Process the command
+
+                // --- FIX: Add this JSON parsing logic ---
+                cJSON *json = cJSON_Parse(data.c_str());
+                if (json == NULL) {
+                    ESP_LOGE(TAG, "Error parsing MQTT JSON command.");
+                    break;
+                }
+
+                const cJSON *output_json = cJSON_GetObjectItem(json, "output");
+                if (cJSON_IsNumber(output_json)) {
+                    int output_num = output_json->valueint;
+                    int brightness = 0;
+                    int fade_ms = 0;
+
+                    const cJSON *brightness_json = cJSON_GetObjectItem(json, "brightness");
+                    const cJSON *state_json = cJSON_GetObjectItem(json, "state");
+                    const cJSON *fade_json = cJSON_GetObjectItem(json, "fade");
+
+                    if (cJSON_IsNumber(brightness_json)) brightness = brightness_json->valueint;
+                    else if (cJSON_IsString(state_json) && strcmp(state_json->valuestring, "ON") == 0) brightness = 100;
+                    
+                    if (cJSON_IsNumber(fade_json)) fade_ms = fade_json->valueint;
+                    
+                    if (g_init.output_cb) {
+                        g_init.output_cb(output_num, brightness, fade_ms);
+                    }
+                }
+                cJSON_Delete(json);
+                // --- END FIX ---
             }
             break;
         }    
