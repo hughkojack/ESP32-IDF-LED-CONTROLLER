@@ -82,3 +82,17 @@ bool hsg_outputs_get_mapping(int output_num, uint8_t* addr, uint8_t* channel) {
     }
     return false;
 }
+
+void hsg_outputs_clear_all() {
+    ESP_LOGI(TAG, "Clearing all physical PWM outputs...");
+    // The valid address range for PCA9685 chips is 0x40 to 0x7F
+    for (uint8_t addr = 0x40; addr <= 0x7F; ++addr) {
+        // We don't know which addresses are populated, so we just send the command to all of them.
+        // If a device exists at the address, it will respond. If not, the command is ignored.
+        // A more advanced way would be to probe first, but this is simple and effective.
+        for (uint8_t channel = 0; channel < 16; ++channel) {
+            // g_i2c_port is set during hsg_outputs_init()
+            pca9685_write_pwm_value(static_cast<i2c_port_t>(g_i2c_port), addr, channel, 0);
+        }
+    }
+}

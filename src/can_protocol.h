@@ -1,7 +1,7 @@
 #ifndef CAN_PROTOCOL_H
 #define CAN_PROTOCOL_H
 
-#include <Arduino.h>
+//#include <Arduino.h>
 
 // --- Device ID ---
 // Define the unique ID for this controller on the CAN bus

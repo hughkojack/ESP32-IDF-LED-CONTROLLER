@@ -26,6 +26,8 @@ esp_err_t hsg_outputs_set_group(const char* name, const char* state, int fade_ms
  */
 bool hsg_outputs_get_mapping(int output, uint8_t *addr, uint8_t *channel);
 
+void hsg_outputs_clear_all();
+
 #ifdef __cplusplus
 }
 #endif

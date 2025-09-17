@@ -36,6 +36,7 @@ extern "C" {
 #include "HSG-API.h"
 #include "hsg_outputs.h"
 #include "hsg_pca9685.h"
+#include "can_protocol.h"
 
 static const char *TAG = "MAIN";
 
@@ -496,10 +497,11 @@ extern "C" void app_main(void) {
     // 6. Init Outputs by PASSING the config to it
     cJSON* initial_config = HSG::API::get_config_json_obj();
     ESP_ERROR_CHECK(hsg_outputs_init(I2C_MASTER_NUM, initial_config));
-    cJSON_Delete(initial_config); // Clean up
-
+    hsg_outputs_clear_all();
+    
     // Now that the API has loaded the config, we can init the outputs
     HSG::API::scan_and_prune_i2c(I2C_MASTER_NUM);
+    cJSON_Delete(initial_config); // Clean up
 
     // 7. Start Application Tasks
     xTaskCreate(main_task, "can_task", 4096, NULL, 5, NULL);
@@ -552,31 +554,79 @@ void main_task(void *pvParameter)
     ESP_ERROR_CHECK(gpio_isr_handler_add((gpio_num_t)PIN_NUM_INT, gpio_isr_handler, (void*)PIN_NUM_INT));
 
     while (1) {
+        if (mcp2515.checkError()) {
+            uint8_t err_flags = mcp2515.getErrorFlags();
+            // Check for the bus-off flag (TXBO)
+            if (err_flags & MCP2515::EFLG_TXBO) {
+                ESP_LOGE(TAG, "CAN bus-off error detected! Attempting to reset MCP2515...");
+                // Attempt to reset the controller to clear the bus-off state
+                if (mcp2515.reset() == MCP2515::ERROR_OK) {
+                    // Re-apply the configuration after reset
+                    mcp2515.setBitrate(CAN_500KBPS, MCP_8MHZ);
+                    mcp2515.setNormalMode();
+                    ESP_LOGI(TAG, "MCP2515 reset and reconfigured successfully.");
+                } else {
+                    ESP_LOGE(TAG, "MCP2515 reset failed.");
+                }
+            } else {
+                ESP_LOGW(TAG, "CAN error detected (flags: 0x%02X), clearing flags.", err_flags);
+                mcp2515.clearRXnOVRFlags();
+                mcp2515.clearInterrupts();
+            }
+             // Give the bus a moment to settle after an error
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue; // Skip trying to read a message this cycle
+        }
         // --- Check for CAN messages ---
-        uint32_t io_num;
-        if (xQueueReceive(gpio_evt_queue, &io_num, pdMS_TO_TICKS(10))) {
-            // FIX: Use lowercase for type and function
+       uint32_t io_num;
+        if (xQueueReceive(gpio_evt_queue, &io_num, pdMS_TO_TICKS(5000))) {
             can_frame can_frame;
-            while (mcp2515.readMessage(&can_frame) == MCP2515::ERROR_OK) {
+            if (mcp2515.readMessage(&can_frame) == MCP2515::ERROR_OK) {
                 ESP_LOGI(TAG, "CAN Frame Received! ID: 0x%lX", can_frame.can_id);
-                xSemaphoreTake(g_last_mutex, portMAX_DELAY);
-                g_last_frame = can_frame;
-                xSemaphoreGive(g_last_mutex);
-                // TODO: Decode and process the CAN message
-                 if (can_frame.can_dlc < 5) continue;
+                // We need to copy the data to the HSG_CanFrame struct
+                // 1. Create a temporary frame of the correct API type
+                HSG_CanFrame api_frame;
+                api_frame.id = can_frame.can_id;
+                api_frame.dlc = can_frame.can_dlc;
+                memcpy(api_frame.data, can_frame.data, can_frame.can_dlc);
+                // 2. Call the public function to update the API's internal cache
+                HSG::API::update_last_can(api_frame);
+                
+                // --- FIX: Decode the message using the new protocol ---
+                CanMessageType msgType = getMessageType(can_frame.can_id);
 
-                // 1. Create a universal Command object
-                Command cmd;
+                // 1. Check if this is a lighting command
+                if (msgType == LIGHTING_COMMAND) {
+                    // Check if the payload is valid
+                    if (can_frame.can_dlc < 5) continue;
 
-                // 2. Parse the CAN frame into the Command object
-                // Byte 0 is command type, we assume it's for an output for now
-                cmd.type = TargetType::OUTPUT;
-                cmd.output_id = can_frame.data[1]; // Target ID
-                cmd.brightness = can_frame.data[2]; // Value
-                cmd.fade_ms = (can_frame.data[4] << 8) | can_frame.data[3]; // Fade Duration
+                    CanCommandType cmdType = (CanCommandType)can_frame.data[0];
+                    
+                    // 2. Check which type of lighting command it is
+                    if (cmdType == SET_BRIGHTNESS || cmdType == SET_STATE) {
+                        Command cmd;
+                        cmd.type = TargetType::OUTPUT;
+                        cmd.output_id = can_frame.data[1]; // Target ID
+                        
+                        // For SET_STATE, 1 means ON (100%) and 0 means OFF (0%)
+                        if (cmdType == SET_STATE) {
+                            cmd.brightness = (can_frame.data[2] == 1) ? 100 : 0;
+                        } else {
+                            cmd.brightness = can_frame.data[2]; // Value (Brightness)
+                        }
+                        
+                        cmd.fade_ms = (can_frame.data[4] << 8) | can_frame.data[3]; // Fade Duration
 
-                // 3. Call the unified command processor
-                processCommand(cmd);
+                        // 3. Call the unified command processor
+                        processCommand(cmd);
+                    }
+                }
+                // You could add else if blocks here to handle SENSOR_DATA or HEARTBEAT
+                else if (msgType == HEARTBEAT) {
+                    uint8_t nodeId = getNodeId(can_frame.can_id);
+                    ESP_LOGI(TAG, "Heartbeat received from node 0x%02X", nodeId);
+                }
+                // --- END FIX ---
             }
         }
     }
