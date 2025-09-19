@@ -1423,20 +1423,6 @@
 					]
 				},
 				{
-					"build" : "esp-idf/esp32-mcp2515",
-					"minimumCMakeVersion" : 
-					{
-						"string" : "3.5"
-					},
-					"parentIndex" : 1,
-					"projectIndex" : 1,
-					"source" : "components/esp32-mcp2515",
-					"targetIndexes" : 
-					[
-						15
-					]
-				},
-				{
 					"build" : "esp-idf/cJSON",
 					"minimumCMakeVersion" : 
 					{
@@ -1448,6 +1434,20 @@
 					"targetIndexes" : 
 					[
 						6
+					]
+				},
+				{
+					"build" : "esp-idf/hsg_api",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.5"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "components/hsg_api",
+					"targetIndexes" : 
+					[
+						46
 					]
 				},
 				{
@@ -1465,17 +1465,17 @@
 					]
 				},
 				{
-					"build" : "esp-idf/hsg_api",
+					"build" : "esp-idf/esp32-mcp2515",
 					"minimumCMakeVersion" : 
 					{
 						"string" : "3.5"
 					},
 					"parentIndex" : 1,
 					"projectIndex" : 1,
-					"source" : "components/hsg_api",
+					"source" : "components/esp32-mcp2515",
 					"targetIndexes" : 
 					[
-						46
+						15
 					]
 				},
 				{
@@ -1757,7 +1757,7 @@
 				{
 					"directoryIndex" : 0,
 					"id" : "LED-Controller.elf::@6890427a1f51a3e7e1df",
-					"jsonFile" : "target-LED-Controller.elf-3c1817e3dc1a1a0268b1.json",
+					"jsonFile" : "target-LED-Controller.elf-8f2bfc2fa1e077a29537.json",
 					"name" : "LED-Controller.elf",
 					"projectIndex" : 0
 				},
@@ -1778,7 +1778,7 @@
 				{
 					"directoryIndex" : 16,
 					"id" : "__idf_app_update::@cc3b426666063acc9674",
-					"jsonFile" : "target-__idf_app_update-28d9674fdc63dd052ed4.json",
+					"jsonFile" : "target-__idf_app_update-ed038fee15b7f3d553e2.json",
 					"name" : "__idf_app_update",
 					"projectIndex" : 1
 				},
@@ -1797,7 +1797,7 @@
 					"projectIndex" : 1
 				},
 				{
-					"directoryIndex" : 95,
+					"directoryIndex" : 94,
 					"id" : "__idf_cJSON::@54b20bbd9ceb236203b8",
 					"jsonFile" : "target-__idf_cJSON-d011d5d25de6280f44aa.json",
 					"name" : "__idf_cJSON",
@@ -1860,7 +1860,7 @@
 					"projectIndex" : 1
 				},
 				{
-					"directoryIndex" : 94,
+					"directoryIndex" : 97,
 					"id" : "__idf_esp32-mcp2515::@f508b1c14a97aa31c63a",
 					"jsonFile" : "target-__idf_esp32-mcp2515-3135672a55ad86d66e87.json",
 					"name" : "__idf_esp32-mcp2515",
@@ -1953,7 +1953,7 @@
 				{
 					"directoryIndex" : 74,
 					"id" : "__idf_esp_local_ctrl::@d6aad58d2946e56208ef",
-					"jsonFile" : "target-__idf_esp_local_ctrl-333cdc9d8c0522db9e13.json",
+					"jsonFile" : "target-__idf_esp_local_ctrl-10e933431521bfe1faf7.json",
 					"name" : "__idf_esp_local_ctrl",
 					"projectIndex" : 1
 				},
@@ -2077,16 +2077,16 @@
 					"projectIndex" : 1
 				},
 				{
-					"directoryIndex" : 97,
+					"directoryIndex" : 95,
 					"id" : "__idf_hsg_api::@5e692ccf9019b1b8a2bd",
-					"jsonFile" : "target-__idf_hsg_api-f78895bea8f6ae2a84b6.json",
+					"jsonFile" : "target-__idf_hsg_api-267d9a102e60c150311a.json",
 					"name" : "__idf_hsg_api",
 					"projectIndex" : 1
 				},
 				{
 					"directoryIndex" : 96,
 					"id" : "__idf_hsg_outputs::@d0144b9cc722a39cc467",
-					"jsonFile" : "target-__idf_hsg_outputs-8b217ec61b005b25d99a.json",
+					"jsonFile" : "target-__idf_hsg_outputs-07e707997b3f74876fd1.json",
 					"name" : "__idf_hsg_outputs",
 					"projectIndex" : 1
 				},
@@ -2233,7 +2233,7 @@
 				{
 					"directoryIndex" : 98,
 					"id" : "__idf_src::@2478b13de56d3028f688",
-					"jsonFile" : "target-__idf_src-fae035265ee3a8d961a7.json",
+					"jsonFile" : "target-__idf_src-f8115c5aa489f29b3204.json",
 					"name" : "__idf_src",
 					"projectIndex" : 1
 				},
@@ -2282,7 +2282,7 @@
 				{
 					"directoryIndex" : 93,
 					"id" : "__idf_wifi_provisioning::@9d7e7ffe1b15746c1098",
-					"jsonFile" : "target-__idf_wifi_provisioning-8f10db669018a58bc1f7.json",
+					"jsonFile" : "target-__idf_wifi_provisioning-8dce14fac42933e7c8ce.json",
 					"name" : "__idf_wifi_provisioning",
 					"projectIndex" : 1
 				},
@@ -2303,7 +2303,7 @@
 				{
 					"directoryIndex" : 24,
 					"id" : "__ldgen_output_sections.ld::@874df54e61e20112dfd4",
-					"jsonFile" : "target-__ldgen_output_sections.ld-dfdc1add1ab2693bf6f7.json",
+					"jsonFile" : "target-__ldgen_output_sections.ld-2e996eec69efef7b50b1.json",
 					"name" : "__ldgen_output_sections.ld",
 					"projectIndex" : 1
 				},
@@ -2443,7 +2443,7 @@
 				{
 					"directoryIndex" : 0,
 					"id" : "flash::@6890427a1f51a3e7e1df",
-					"jsonFile" : "target-flash-53edf3ae3a338585b513.json",
+					"jsonFile" : "target-flash-8381723fe9e7cea18bda.json",
 					"name" : "flash",
 					"projectIndex" : 0
 				},

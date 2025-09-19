@@ -26,6 +26,9 @@ static const char* NVS_KEY_CONFIG = "app_cfg";
 extern const char _binary_ESP32_POE_html_start[] asm("_binary_ESP32_POE_html_start");
 extern const char _binary_ESP32_POE_html_end[]   asm("_binary_ESP32_POE_html_end");
 
+extern const uint8_t _binary_favicon_ico_start[] asm("_binary_favicon_ico_start");
+extern const uint8_t _binary_favicon_ico_end[]   asm("_binary_favicon_ico_end");
+
 namespace {
 
 httpd_handle_t g_http = nullptr;
@@ -108,7 +111,7 @@ static std::vector<uint8_t> scan_pca9685_addrs(i2c_port_t port) {
     for (uint8_t addr = 0x40; addr <= 0x7F; ++addr) {
         if (addr == 0x70) continue; // ignore All-Call
         if (i2c_probe(port, addr) == ESP_OK) {
-            ESP_LOGI(TAG, "Found I2C device at 0x%02X", addr);
+//            ESP_LOGI(TAG, "Found I2C device at 0x%02X", addr);
             found.push_back(addr);
         }
     }
@@ -116,6 +119,12 @@ static std::vector<uint8_t> scan_pca9685_addrs(i2c_port_t port) {
 }
 
 // ------------------ HTTP handlers ------------------
+static esp_err_t h_favicon(httpd_req_t* req)
+{
+    size_t len = _binary_favicon_ico_end - _binary_favicon_ico_start;
+    httpd_resp_set_type(req, "image/x-icon");
+    return httpd_resp_send(req, (const char*)_binary_favicon_ico_start, len);
+}
 
 // GET /
 static esp_err_t h_root(httpd_req_t* req) {
@@ -383,15 +392,17 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &root));
 
     // REST
-    httpd_uri_t adopt_get  { .uri="/api/adopt",    .method=HTTP_GET,  .handler=h_adopt,      .user_ctx=nullptr };
-    httpd_uri_t config_get { .uri="/api/config",   .method=HTTP_GET,  .handler=h_config_get, .user_ctx=nullptr };
-    httpd_uri_t config_post{ .uri="/api/config",   .method=HTTP_POST, .handler=h_config_post,.user_ctx=nullptr };
-    httpd_uri_t mqtt_get   { .uri="/api/mqtt",     .method=HTTP_GET,  .handler=h_mqtt_get,   .user_ctx=nullptr };
+    httpd_uri_t adopt_get  { .uri="/api/adopt",    .method=HTTP_GET,   .handler=h_adopt,      .user_ctx=nullptr };
+    httpd_uri_t config_get { .uri="/api/config",   .method=HTTP_GET,   .handler=h_config_get, .user_ctx=nullptr };
+    httpd_uri_t config_post{ .uri="/api/config",   .method=HTTP_POST,  .handler=h_config_post,.user_ctx=nullptr };
+    httpd_uri_t mqtt_get   { .uri="/api/mqtt",     .method=HTTP_GET,   .handler=h_mqtt_get,   .user_ctx=nullptr };
 //    httpd_uri_t mqtt_post  { .uri="/api/mqtt",     .method=HTTP_POST, .handler=h_mqtt_post,  .user_ctx=nullptr };
-    httpd_uri_t cmd_post   { .uri="/api/command",  .method=HTTP_POST, .handler=h_command,    .user_ctx=nullptr };
-    httpd_uri_t can_last   { .uri="/api/can/last", .method=HTTP_GET,  .handler=h_can_last,   .user_ctx=nullptr };
-    httpd_uri_t ota_post   { .uri="/api/ota",      .method=HTTP_POST, .handler=h_ota,        .user_ctx=nullptr };
+    httpd_uri_t cmd_post   { .uri="/api/command",  .method=HTTP_POST,  .handler=h_command,    .user_ctx=nullptr };
+    httpd_uri_t can_last   { .uri="/api/can/last", .method=HTTP_GET,   .handler=h_can_last,   .user_ctx=nullptr };
+    httpd_uri_t ota_post   { .uri="/api/ota",      .method=HTTP_POST,  .handler=h_ota,        .user_ctx=nullptr };
+    httpd_uri_t favicon_get = { .uri="/favicon.ico", .method=HTTP_GET, .handler=h_favicon,    .user_ctx=nullptr };
 
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &favicon_get));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &adopt_get));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &config_get));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &config_post));
@@ -543,7 +554,7 @@ esp_err_t scan_and_prune_i2c(int i2c_port) {
     if (found.empty()) {
         ESP_LOGW(TAG, "No PCA9685 detected on I2C bus");
     } else {
-        ESP_LOGI(TAG, "Detected %d PCA9685 device(s)", (int)found.size());
+//        ESP_LOGI(TAG, "Detected %d PCA9685 device(s)", (int)found.size());
     }
     prune_pca9685_config_to_detected(found);
     return ESP_OK;

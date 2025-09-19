@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include <vector>
 #include <string>
+#include <set>
 
 static const char* TAG = "HSG-OUTPUTS";
 
@@ -58,6 +59,34 @@ esp_err_t hsg_outputs_init(int i2c_port, cJSON* config_json) {
         return ESP_ERR_INVALID_ARG;
     }
     parse_config(config_json);
+
+    // --- FIX: Initialize each configured PCA9685 chip ---
+    ESP_LOGI(TAG, "Initializing all configured PCA9685 chips...");
+    
+    // Use a set to get a list of unique I2C addresses from the mappings
+    std::set<uint8_t> addresses;
+    for (const auto& map : g_mappings) {
+        addresses.insert(map.i2c_addr);
+    }
+
+    if (addresses.empty()) {
+        ESP_LOGW(TAG, "No PCA9685 addresses are mapped. Skipping chip initialization.");
+    } else {
+        // Initialize each unique chip
+        for (uint8_t addr : addresses) {
+            // Call your existing init function
+            esp_err_t result = pca9685_init(static_cast<i2c_port_t>(g_i2c_port), addr, 1000); // 1kHz frequency
+            if (result == ESP_OK) {
+                ESP_LOGI(TAG, "   ...success.");
+            } else {
+                ESP_LOGE(TAG, "   ...FAILED. Error: %s", esp_err_to_name(result));
+            }
+        }
+    }
+    // --- END FIX ---
+
+
+
     return ESP_OK;
 }
 

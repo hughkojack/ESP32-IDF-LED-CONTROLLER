@@ -66,6 +66,12 @@
 				"parent" : 4
 			},
 			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 333,
+				"parent" : 4
+			},
+			{
 				"command" : 5,
 				"file" : 0,
 				"line" : 456,
@@ -105,13 +111,7 @@
 				"command" : 7,
 				"file" : 0,
 				"line" : 309,
-				"parent" : 11
-			},
-			{
-				"command" : 2,
-				"file" : 0,
-				"line" : 333,
-				"parent" : 4
+				"parent" : 12
 			},
 			{
 				"command" : 2,
@@ -134,7 +134,7 @@
 			{
 				"command" : 11,
 				"file" : 1,
-				"line" : 17,
+				"line" : 16,
 				"parent" : 0
 			},
 			{
@@ -154,75 +154,75 @@
 					"fragment" : "-mlongcalls -Wno-frame-address   "
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-ffunction-sections"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-fdata-sections"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Wall"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Werror=all"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Wno-error=unused-function"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Wno-error=unused-variable"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Wno-error=deprecated-declarations"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Wextra"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Wno-unused-parameter"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Wno-sign-compare"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-ggdb"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Og"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-fmacro-prefix-map=C:/Dev/LED-Controller=."
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-fmacro-prefix-map=C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623=IDF"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-fstrict-volatile-bitfields"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Wno-error=unused-but-set-variable"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-fno-jump-tables"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-fno-tree-switch-conversion"
 				},
 				{
@@ -238,41 +238,41 @@
 					"fragment" : "-fno-rtti"
 				},
 				{
-					"backtrace" : 7,
+					"backtrace" : 8,
 					"fragment" : "-D_GNU_SOURCE"
 				},
 				{
-					"backtrace" : 7,
+					"backtrace" : 8,
 					"fragment" : "-DIDF_VER=\\\"4.4.5\\\""
 				},
 				{
-					"backtrace" : 7,
+					"backtrace" : 8,
 					"fragment" : "-DESP_PLATFORM"
 				},
 				{
-					"backtrace" : 7,
+					"backtrace" : 8,
 					"fragment" : "-D_POSIX_READER_WRITER_LOCKS"
 				}
 			],
 			"defines" : 
 			[
 				{
-					"backtrace" : 8,
+					"backtrace" : 9,
 					"define" : "HAVE_CONFIG_H"
 				},
 				{
-					"backtrace" : 9,
+					"backtrace" : 10,
 					"define" : "MBEDTLS_CONFIG_FILE=\"mbedtls/esp_config.h\""
 				}
 			],
 			"includes" : 
 			[
 				{
-					"backtrace" : 10,
+					"backtrace" : 11,
 					"path" : "C:/Dev/LED-Controller/.pio/build/esp32-poe-idf/config"
 				},
 				{
-					"backtrace" : 12,
+					"backtrace" : 13,
 					"path" : "C:/Dev/LED-Controller/components/hsg_api/include"
 				},
 				{
@@ -476,52 +476,64 @@
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_timer/include"
 				},
 				{
-					"backtrace" : 8,
+					"backtrace" : 9,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_http_server/include"
 				},
 				{
-					"backtrace" : 8,
+					"backtrace" : 9,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/nghttp/port/include"
 				},
 				{
-					"backtrace" : 8,
+					"backtrace" : 9,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/nghttp/nghttp2/lib/includes"
 				},
 				{
-					"backtrace" : 9,
+					"backtrace" : 10,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/nvs_flash/include"
 				},
 				{
-					"backtrace" : 9,
+					"backtrace" : 10,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/spi_flash/include"
 				},
 				{
-					"backtrace" : 9,
+					"backtrace" : 10,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mbedtls/port/include"
 				},
 				{
-					"backtrace" : 9,
+					"backtrace" : 10,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mbedtls/mbedtls/include"
 				},
 				{
-					"backtrace" : 9,
+					"backtrace" : 10,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mbedtls/esp_crt_bundle/include"
 				},
 				{
-					"backtrace" : 5,
+					"backtrace" : 6,
 					"path" : "C:/Dev/LED-Controller/components/cJSON"
 				},
 				{
-					"backtrace" : 13,
+					"backtrace" : 14,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/app_update/include"
 				},
 				{
-					"backtrace" : 13,
+					"backtrace" : 14,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/bootloader_support/include"
 				},
 				{
-					"backtrace" : 14,
-					"path" : "C:/Dev/LED-Controller/components/hsg_outputs/include"
+					"backtrace" : 5,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mqtt/esp-mqtt/include"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/tcp_transport/include"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp-tls"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp-tls/esp-tls-crypto"
 				}
 			],
 			"language" : "CXX",
@@ -537,113 +549,113 @@
 					"fragment" : "-mlongcalls   "
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-ffunction-sections"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-fdata-sections"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Wall"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Werror=all"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Wno-error=unused-function"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Wno-error=unused-variable"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Wno-error=deprecated-declarations"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Wextra"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Wno-unused-parameter"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Wno-sign-compare"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-ggdb"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Og"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-fmacro-prefix-map=C:/Dev/LED-Controller=."
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-fmacro-prefix-map=C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623=IDF"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-fstrict-volatile-bitfields"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-Wno-error=unused-but-set-variable"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-fno-jump-tables"
 				},
 				{
-					"backtrace" : 6,
+					"backtrace" : 7,
 					"fragment" : "-fno-tree-switch-conversion"
 				},
 				{
-					"backtrace" : 7,
+					"backtrace" : 8,
 					"fragment" : "-D_GNU_SOURCE"
 				},
 				{
-					"backtrace" : 7,
+					"backtrace" : 8,
 					"fragment" : "-DIDF_VER=\\\"4.4.5\\\""
 				},
 				{
-					"backtrace" : 7,
+					"backtrace" : 8,
 					"fragment" : "-DESP_PLATFORM"
 				},
 				{
-					"backtrace" : 7,
+					"backtrace" : 8,
 					"fragment" : "-D_POSIX_READER_WRITER_LOCKS"
 				}
 			],
 			"defines" : 
 			[
 				{
-					"backtrace" : 8,
+					"backtrace" : 9,
 					"define" : "HAVE_CONFIG_H"
 				},
 				{
-					"backtrace" : 9,
+					"backtrace" : 10,
 					"define" : "MBEDTLS_CONFIG_FILE=\"mbedtls/esp_config.h\""
 				}
 			],
 			"includes" : 
 			[
 				{
-					"backtrace" : 10,
+					"backtrace" : 11,
 					"path" : "C:/Dev/LED-Controller/.pio/build/esp32-poe-idf/config"
 				},
 				{
-					"backtrace" : 12,
+					"backtrace" : 13,
 					"path" : "C:/Dev/LED-Controller/components/hsg_api/include"
 				},
 				{
@@ -847,52 +859,64 @@
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_timer/include"
 				},
 				{
-					"backtrace" : 8,
+					"backtrace" : 9,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_http_server/include"
 				},
 				{
-					"backtrace" : 8,
+					"backtrace" : 9,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/nghttp/port/include"
 				},
 				{
-					"backtrace" : 8,
+					"backtrace" : 9,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/nghttp/nghttp2/lib/includes"
 				},
 				{
-					"backtrace" : 9,
+					"backtrace" : 10,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/nvs_flash/include"
 				},
 				{
-					"backtrace" : 9,
+					"backtrace" : 10,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/spi_flash/include"
 				},
 				{
-					"backtrace" : 9,
+					"backtrace" : 10,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mbedtls/port/include"
 				},
 				{
-					"backtrace" : 9,
+					"backtrace" : 10,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mbedtls/mbedtls/include"
 				},
 				{
-					"backtrace" : 9,
+					"backtrace" : 10,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mbedtls/esp_crt_bundle/include"
 				},
 				{
-					"backtrace" : 5,
+					"backtrace" : 6,
 					"path" : "C:/Dev/LED-Controller/components/cJSON"
 				},
 				{
-					"backtrace" : 13,
+					"backtrace" : 14,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/app_update/include"
 				},
 				{
-					"backtrace" : 13,
+					"backtrace" : 14,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/bootloader_support/include"
 				},
 				{
-					"backtrace" : 14,
-					"path" : "C:/Dev/LED-Controller/components/hsg_outputs/include"
+					"backtrace" : 5,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mqtt/esp-mqtt/include"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/tcp_transport/include"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp-tls"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp-tls/esp-tls-crypto"
 				}
 			],
 			"language" : "ASM",
@@ -910,6 +934,10 @@
 		},
 		{
 			"backtrace" : 5,
+			"id" : "__idf_mqtt::@c1ab2c6a99226d1f4b56"
+		},
+		{
+			"backtrace" : 6,
 			"id" : "__idf_cJSON::@54b20bbd9ceb236203b8"
 		}
 	],

@@ -526,15 +526,15 @@
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/protobuf-c/protobuf-c"
 				},
 				{
-					"backtrace" : 7,
+					"backtrace" : 8,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mdns/include"
 				},
 				{
-					"backtrace" : 7,
+					"backtrace" : 8,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/console"
 				},
 				{
-					"backtrace" : 8,
+					"backtrace" : 7,
 					"path" : "C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/json/cJSON"
 				}
 			],
@@ -561,19 +561,19 @@
 		},
 		{
 			"backtrace" : 5,
-			"id" : "__idf_protocomm::@d76d01c8dec06205e1fc"
-		},
-		{
-			"backtrace" : 5,
 			"id" : "__idf_protobuf-c::@b14513c4bd859268ec22"
 		},
 		{
+			"backtrace" : 5,
+			"id" : "__idf_protocomm::@d76d01c8dec06205e1fc"
+		},
+		{
 			"backtrace" : 7,
-			"id" : "__idf_mdns::@2f076c6da9dadb273cdc"
+			"id" : "__idf_json::@c78a8bdc820334f01148"
 		},
 		{
 			"backtrace" : 8,
-			"id" : "__idf_json::@c78a8bdc820334f01148"
+			"id" : "__idf_mdns::@2f076c6da9dadb273cdc"
 		}
 	],
 	"id" : "__idf_wifi_provisioning::@9d7e7ffe1b15746c1098",

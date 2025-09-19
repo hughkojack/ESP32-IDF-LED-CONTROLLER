@@ -218,7 +218,7 @@ CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO:STRING=
 CMAKE_STRIP:FILEPATH=C:/Users/Hugh/.platformio/packages/toolchain-xtensa-esp32@8.4.0+2021r2-patch5/bin/xtensa-esp32-elf-strip.exe
 
 //The CMake toolchain file
-CMAKE_TOOLCHAIN_FILE:FILEPATH=C:/Users/Hugh/.platformio/packages/framework-espidf/tools/cmake/toolchain-esp32.cmake
+CMAKE_TOOLCHAIN_FILE:FILEPATH=C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/tools/cmake/toolchain-esp32.cmake
 
 //If this value is on, makefiles will be generated without the
 // .SILENT directive, and all commands will be echoed to the console
@@ -240,6 +240,9 @@ EXTRA_COMPONENT_DIRS:PATH=C:/Dev/LED-Controller/src
 
 //Git command line client
 GIT_EXECUTABLE:FILEPATH=C:/Program Files/Git/cmd/git.exe
+
+//No help, variable specified on the command line.
+IDF_SKIP_GIT_REVISION:UNINITIALIZED=1
 
 //IDF Build Target
 IDF_TARGET:STRING=esp32
@@ -447,9 +450,6 @@ __idf_lwip_LIB_DEPENDS:STATIC=general;__idf_cxx;general;__idf_newlib;general;__i
 
 //Dependencies for the target
 __idf_mbedtls_LIB_DEPENDS:STATIC=general;__idf_cxx;general;__idf_newlib;general;__idf_freertos;general;__idf_esp_hw_support;general;__idf_heap;general;__idf_log;general;__idf_lwip;general;__idf_soc;general;__idf_hal;general;__idf_esp_rom;general;__idf_esp_common;general;__idf_esp_system;general;__idf_esp32;general;mbedtls;general;mbedcrypto;general;mbedx509;
-
-//Dependencies for the target
-__idf_mcp2515_LIB_DEPENDS:STATIC=general;__idf_cxx;general;__idf_newlib;general;__idf_freertos;general;__idf_esp_hw_support;general;__idf_heap;general;__idf_log;general;__idf_lwip;general;__idf_soc;general;__idf_hal;general;__idf_esp_rom;general;__idf_esp_common;general;__idf_esp_system;
 
 //Dependencies for the target
 __idf_mdns_LIB_DEPENDS:STATIC=general;__idf_cxx;general;__idf_newlib;general;__idf_freertos;general;__idf_esp_hw_support;general;__idf_heap;general;__idf_log;general;__idf_lwip;general;__idf_soc;general;__idf_hal;general;__idf_esp_rom;general;__idf_esp_common;general;__idf_esp_system;

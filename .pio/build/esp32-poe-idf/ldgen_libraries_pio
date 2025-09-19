@@ -69,5 +69,7 @@ C:/Dev/LED-Controller/.pio/build/esp32-poe-idf/esp-idf/perfmon/libperfmon.a
 C:/Dev/LED-Controller/.pio/build/esp32-poe-idf/esp-idf/spiffs/libspiffs.a
 C:/Dev/LED-Controller/.pio/build/esp32-poe-idf/esp-idf/ulp/libulp.a
 C:/Dev/LED-Controller/.pio/build/esp32-poe-idf/esp-idf/wifi_provisioning/libwifi_provisioning.a
-C:/Dev/LED-Controller/.pio/build/esp32-poe-idf/esp-idf/mcp2515/libmcp2515.a
 C:/Dev/LED-Controller/.pio/build/esp32-poe-idf/esp-idf/cJSON/libcJSON.a
+C:/Dev/LED-Controller/.pio/build/esp32-poe-idf/esp-idf/hsg_api/libhsg_api.a
+C:/Dev/LED-Controller/.pio/build/esp32-poe-idf/esp-idf/hsg_outputs/libhsg_outputs.a
+C:/Dev/LED-Controller/.pio/build/esp32-poe-idf/esp-idf/esp32-mcp2515/libesp32-mcp2515.a

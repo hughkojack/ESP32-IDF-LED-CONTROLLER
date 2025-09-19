@@ -105,13 +105,8 @@ static spi_device_handle_t mcp_spi_handle;
 static can_frame g_last_frame = {};
 static SemaphoreHandle_t g_last_mutex;
 
-/* ---------------------- Wi-Fi config ---------------------- */
-#ifndef WIFI_SSID
-#define WIFI_SSID "HSG"
-#endif
-#ifndef WIFI_PASS
-#define WIFI_PASS "myhomesecurity9981"
-#endif
+static esp_netif_t *s_eth_netif = NULL;
+static esp_netif_t *s_wifi_netif = NULL;
 
 /*--------------------------- Function Prototypes ---------------------------*/
 static esp_err_t i2c_master_init(void);
@@ -140,7 +135,7 @@ static void phy_power_set(bool on) {
 }
 
 /* ---------------------- Network Initialization ---------------------- */
-// --- Unified Network Event Handler ---
+// --- Unified Network Event Handler with Failback Logic ---
 static void net_event_handler(void* arg, esp_event_base_t event_base,
                               int32_t event_id, void* event_data)
 {
@@ -148,28 +143,26 @@ static void net_event_handler(void* arg, esp_event_base_t event_base,
     if (event_base == ETH_EVENT) {
         if (event_id == ETHERNET_EVENT_CONNECTED) {
             ESP_LOGI(TAG, "Ethernet Link Up");
+            if (s_wifi_netif != NULL) {
+                ESP_ERROR_CHECK(esp_wifi_stop());
+            }
+            s_wifi_connected = false;
         } else if (event_id == ETHERNET_EVENT_DISCONNECTED) {
             ESP_LOGI(TAG, "Ethernet Link Down");
             s_eth_connected = false;
-            // Ethernet lost, start Wi-Fi as a backup if not already connected
-            if (!s_wifi_connected) {
-                wifi_start();
-            }
-        } else if (event_id == ETHERNET_EVENT_START) {
-            ESP_LOGI(TAG, "Ethernet Started");
-        } else if (event_id == ETHERNET_EVENT_STOP) {
-            ESP_LOGI(TAG, "Ethernet Stopped");
-            s_eth_connected = false;
+            // Ethernet lost, start Wi-Fi as a backup
+            wifi_start();
         }
     }
-
+    
     // --- Wi-Fi Events ---
     if (event_base == WIFI_EVENT) {
         if (event_id == WIFI_EVENT_STA_START) {
+            // FIX: This is the critical missing piece.
+            // This event means the Wi-Fi hardware is ready, now we can connect.
             esp_wifi_connect();
             ESP_LOGI(TAG, "Wi-Fi connecting...");
         } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
-            // If ethernet is also down, retry Wi-Fi
             if (!s_eth_connected) {
                 ESP_LOGI(TAG, "Wi-Fi disconnected, retrying...");
                 esp_wifi_connect();
@@ -182,22 +175,24 @@ static void net_event_handler(void* arg, esp_event_base_t event_base,
         if (event_id == IP_EVENT_ETH_GOT_IP) {
             ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
             ESP_LOGI(TAG, "Ethernet Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+            esp_netif_set_default_netif(s_eth_netif);
             s_eth_connected = true;
-            // Signal that a network connection is active
+            if (mqtt_client) esp_mqtt_client_reconnect(mqtt_client);
             xEventGroupSetBits(s_net_event_group, ETH_CONNECTED_BIT);
         } else if (event_id == IP_EVENT_STA_GOT_IP) {
             ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
             ESP_LOGI(TAG, "Wi-Fi Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
-            s_wifi_connected = true;
-            // If MQTT was disconnected due to network loss, reconnect it now
-            if (mqtt_client) {
-                esp_mqtt_client_reconnect(mqtt_client);
+            if (!s_eth_connected) {
+                esp_netif_set_default_netif(s_wifi_netif);
             }
-            // Signal that a network connection is active
+            s_wifi_connected = true;
+            if (mqtt_client) esp_mqtt_client_reconnect(mqtt_client);
             xEventGroupSetBits(s_net_event_group, WIFI_CONNECTED_BIT);
         }
     }
 }
+
+
 
 // --- Ethernet Start Function ---
 static void eth_start(void)
@@ -205,6 +200,8 @@ static void eth_start(void)
     // Create Ethernet network interface
     esp_netif_config_t cfg = ESP_NETIF_DEFAULT_ETH();
     esp_netif_t *eth_netif = esp_netif_new(&cfg);
+
+    s_eth_netif = eth_netif;
 
      // Power up PHY first (GPIO12)
     phy_power_set(true);
@@ -250,7 +247,15 @@ static void eth_start(void)
 // --- Wi-Fi Start Function ---
 static void wifi_start(void)
 {
-    ESP_LOGI(TAG, "Ethernet failed or disconnected, starting Wi-Fi...");
+    ESP_LOGI(TAG, "Attempting to start Wi-Fi as failover...");
+    
+    // Create Wi-Fi station interface if it doesn't exist
+    if (s_wifi_netif == NULL) {
+        s_wifi_netif = esp_netif_create_default_wifi_sta();
+        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+        ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    }
+
     
     // 1. Get the entire config object from your API
     cJSON* config_json = HSG::API::get_config_json_obj();
@@ -312,12 +317,9 @@ static void wifi_start(void)
 
 
 // --- Main Network Initialization ---
-static void initialize_network_interfaces(void)
-{
+static void initialize_network_interfaces(void) {
     // Initialize TCP/IP stack
     ESP_ERROR_CHECK(esp_netif_init());
-
-    // Create default event loop
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     // Register our unified event handler for all network events
@@ -433,7 +435,11 @@ void processFades() {
                 // Get the physical address from our mapping component
                 if (hsg_outputs_get_mapping(i + 1, &addr, &channel)) {
                     // Send the raw value to the hardware driver
-                    pca9685_write_pwm_value(I2C_MASTER_NUM, addr, channel, newPwmValue);
+                    esp_err_t result = pca9685_write_pwm_value(I2C_MASTER_NUM, addr, channel, newPwmValue);
+                    
+                    if (result != ESP_OK) {
+                        ESP_LOGE(TAG, "Failed to write PWM value to PCA@0x%02X ch%d. Error: %s", addr, channel, esp_err_to_name(result));
+                    }
                 }
             }
         }
