@@ -29,7 +29,7 @@ struct Init {
     std::function<void(int out, int brightness, int fade_ms)> output_cb;
 
     // group_cb(name, state["ON"/"OFF"], fade_ms)
-    std::function<void(const char* name, const char* state, int fade_ms)> group_cb;
+    std::function<void(const char* name, int brightness, int fade_ms)> group_cb;
 
     // NEW: Callback to notify main that config has been updated
     std::function<void()> config_updated_cb;

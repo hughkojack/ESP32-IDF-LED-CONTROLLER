@@ -15,7 +15,7 @@ esp_err_t hsg_outputs_reload_config(cJSON* config_json);
 esp_err_t hsg_outputs_set(int out, int brightness, int fade_ms);
 
 // Set a group by name ("AA", "BB", etc.)
-esp_err_t hsg_outputs_set_group(const char* name, const char* state, int fade_ms);
+//esp_err_t hsg_outputs_set_group(const char* name, const char* state, int fade_ms);
 
 /**
  * @brief Gets the physical mapping (PCA9685 address and channel) for a logical output number.

@@ -154,7 +154,7 @@ static void net_event_handler(void* arg, esp_event_base_t event_base,
             wifi_start();
         }
     }
-    
+
     // --- Wi-Fi Events ---
     if (event_base == WIFI_EVENT) {
         if (event_id == WIFI_EVENT_STA_START) {
@@ -389,10 +389,35 @@ void processCommand(const Command& cmd) {
     if (cmd.type == TargetType::OUTPUT) {
         setOutput(cmd.output_id, cmd.brightness, cmd.fade_ms);
     } else if (cmd.type == TargetType::GROUP) {
-        // TODO: Call your group handling function here
-        // For example: hsg_outputs_set_group(cmd.group_name.c_str(), cmd.brightness > 0 ? "ON" : "OFF", cmd.fade_ms);
+        cJSON* config = HSG::API::get_config_json_obj();
+        if (!config) {
+            ESP_LOGE(TAG, "Failed to get config to process group command.");
+            return;
+        }
+
+        // 2. Find the "groups" object and the specific group name
+        cJSON* groups = cJSON_GetObjectItem(config, "groups");
+        cJSON* group_outputs = cJSON_GetObjectItem(groups, cmd.group_name.c_str());
+
+        // 3. If the group is found, iterate through its outputs
+        if (cJSON_IsArray(group_outputs)) {
+            cJSON* output_item = NULL;
+            cJSON_ArrayForEach(output_item, group_outputs) {
+                if (cJSON_IsNumber(output_item)) {
+                    // For each output in the group, call setOutput()
+                    int output_id = output_item->valueint;
+                    setOutput(output_id, cmd.brightness, cmd.fade_ms);
+                }
+            }
+        } else {
+            ESP_LOGW(TAG, "Group '%s' not found in configuration.", cmd.group_name.c_str());
+        }
+
+        // 4. Clean up the cJSON object
+        cJSON_Delete(config);
     }
 }
+
 
 void setOutput(int output, int brightness, int fadeMs) {
     int outputIndex = output - 1;
@@ -468,34 +493,35 @@ extern "C" void app_main(void) {
     xEventGroupWaitBits(s_net_event_group, ETH_CONNECTED_BIT | WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
     ESP_LOGI(TAG, "Network connected.");
     
-    // 3. Initialize the core API component
-    // This starts the web server and makes the config available
+    // 3. Initialize the core API component and its services
     HSG::API::Init api_init;
     api_init.i2c_port = I2C_MASTER_NUM;
     api_init.output_cb = [](int out, int brightness, int fade_ms){
-        ESP_LOGI(TAG, "API received command for output %d, brightness %d, fade %dms", out, brightness, fade_ms);
         Command cmd = {TargetType::OUTPUT, out, "", brightness, fade_ms};
         processCommand(cmd);
     };
-    api_init.group_cb = [](const char* name, const char* state, int fade_ms){
-        // Group handler logic
+    api_init.group_cb = [](const char* name, int brightness, int fade_ms){
+     //   int brightness = (strcmp(state, "ON") == 0) ? 100 : 0;
+        Command cmd = {TargetType::GROUP, 0, std::string(name), brightness, fade_ms};
+        processCommand(cmd);
     };
     
-    api_init.config_updated_cb = [](){
+/*    api_init.config_updated_cb = [](){
         ESP_LOGI(TAG, "Configuration updated, reloading outputs...");
         cJSON* config = HSG::API::get_config_json_obj();
         hsg_outputs_reload_config(config);
         cJSON_Delete(config);
     };
-
+*/
     HSG::API::start(api_init);
     HSG::API::mqtt_start();
 
+    /*
     // 4. *** NEW: Wait for the API to confirm config is loaded ***
     ESP_LOGI(TAG, "Waiting for HSG-API configuration to be loaded...");
     xEventGroupWaitBits(HSG::API::get_event_group(), CONFIG_LOADED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
     ESP_LOGI(TAG, "HSG-API configuration is ready.");
-
+*/
     // 5. Initialize Hardware Drivers and Dependent Components
     ESP_ERROR_CHECK(i2c_master_init());
     ESP_LOGI(TAG, "I2C ready: SDA=%d SCL=%d @%dHz", I2C_MASTER_SDA_IO, I2C_MASTER_SCL_IO, I2C_MASTER_FREQ_HZ);

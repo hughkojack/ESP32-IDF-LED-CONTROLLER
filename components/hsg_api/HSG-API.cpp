@@ -302,9 +302,25 @@ static esp_err_t h_command(httpd_req_t* req) {
         }
         if (g_init.output_cb) g_init.output_cb(out->valueint, brightness, fade);
     } else if (auto* grp = cJSON_GetObjectItem(cmd, "group"); cJSON_IsString(grp)) {
-        const char* state = "ON";
-        if (auto* s = cJSON_GetObjectItem(cmd, "state"); cJSON_IsString(s)) state = s->valuestring;
-        if (g_init.group_cb) g_init.group_cb(grp->valuestring, state, fade);
+        int brightness = 100; // Default to ON
+        int fade_ms = 0;
+        
+        const cJSON* brightness_json = cJSON_GetObjectItem(cmd, "brightness");
+        const cJSON* state_json = cJSON_GetObjectItem(cmd, "state");
+        const cJSON* fade_json = cJSON_GetObjectItem(cmd, "fade");
+
+        if (cJSON_IsNumber(brightness_json)) {
+            brightness = brightness_json->valueint;
+        } else if (cJSON_IsString(state_json) && strcmp(state_json->valuestring, "OFF") == 0) {
+            brightness = 0;
+        }
+
+        if (cJSON_IsNumber(fade_json)) {
+            fade_ms = fade_json->valueint;
+        }
+        
+//        if (auto* s = cJSON_GetObjectItem(cmd, "state"); cJSON_IsString(s)) state = s->valuestring;
+        if (g_init.group_cb) g_init.group_cb(grp->valuestring, brightness, fade_ms);
     }
 
     cJSON_Delete(cmd);
@@ -587,15 +603,15 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
         case MQTT_EVENT_DISCONNECTED:
             ESP_LOGI(TAG, "MQTT Disconnected");
             break;
-        case MQTT_EVENT_DATA:{
+        case MQTT_EVENT_DATA: {
+            // Check if the topic matches our command topic
             if (!g_mqtt_command_topic.empty() && 
                 event->topic_len == g_mqtt_command_topic.length() && 
                 strncmp(event->topic, g_mqtt_command_topic.c_str(), event->topic_len) == 0) {
 
                 std::string data(event->data, event->data_len);
-                ESP_LOGI(TAG, "MQTT Command received on topic %s: %s", g_mqtt_command_topic.c_str(), data.c_str());
+                ESP_LOGI(TAG, "MQTT Command received: %s", data.c_str());
 
-                // --- FIX: Add this JSON parsing logic ---
                 cJSON *json = cJSON_Parse(data.c_str());
                 if (json == NULL) {
                     ESP_LOGE(TAG, "Error parsing MQTT JSON command.");
@@ -603,6 +619,9 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
                 }
 
                 const cJSON *output_json = cJSON_GetObjectItem(json, "output");
+                const cJSON *group_json = cJSON_GetObjectItem(json, "group");
+
+                // --- Check if it's an OUTPUT command ---
                 if (cJSON_IsNumber(output_json)) {
                     int output_num = output_json->valueint;
                     int brightness = 0;
@@ -620,9 +639,33 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
                     if (g_init.output_cb) {
                         g_init.output_cb(output_num, brightness, fade_ms);
                     }
+                } 
+                // --- FIX: Add this block to handle GROUP commands ---
+                else if (cJSON_IsString(group_json)) {
+                    int brightness = 100; // Default to ON
+                    int fade_ms = 0;
+
+                    const cJSON *brightness_json = cJSON_GetObjectItem(json, "brightness");
+                    const cJSON *state_json = cJSON_GetObjectItem(json, "state");
+                    const cJSON *fade_json = cJSON_GetObjectItem(json, "fade");
+
+                    if (cJSON_IsNumber(brightness_json)) {
+                        brightness = brightness_json->valueint;
+                    } else if (cJSON_IsString(state_json) && strcmp(state_json->valuestring, "OFF") == 0) {
+                        brightness = 0;
+                    }
+
+                    if (cJSON_IsNumber(fade_json)) {
+                        fade_ms = fade_json->valueint;
+                    }
+
+                    if (g_init.group_cb) {
+                        g_init.group_cb(group_json->valuestring, brightness, fade_ms);
+                    }
                 }
-                cJSON_Delete(json);
                 // --- END FIX ---
+                
+                cJSON_Delete(json);
             }
             break;
         }    
