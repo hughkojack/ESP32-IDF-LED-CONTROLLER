@@ -12,6 +12,7 @@ extern "C" {
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 #include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -54,8 +55,26 @@ static bool s_wifi_connected = false;
 static esp_mqtt_client_handle_t mqtt_client;
 i2c_master_bus_handle_t i2c_bus_handle;
 
+
 /* ---------------------- Global State for Commands and Fading ---------------------- */
 enum class TargetType { OUTPUT, GROUP };
+
+struct Binding {
+    // The Trigger (what button was pressed)
+    int switchId;
+    int button;
+    std::string onAction; // e.g., "CLICK", "HOLD"
+
+    // The Action (what to do)
+    TargetType targetType; // OUTPUT or GROUP
+    int outputId;
+    std::string groupName;
+    std::string state; // "ON", "OFF", "TOGGLE"
+    int brightness;
+    int fade_ms;
+};
+// A vector to hold all the rules loaded from config
+static std::vector<Binding> g_bindings;
 
 struct Command {
     TargetType type = TargetType::OUTPUT;
@@ -473,6 +492,41 @@ void processFades() {
     }
 }
 
+static void load_bindings() {
+    g_bindings.clear();
+    cJSON* config = HSG::API::get_config_json_obj();
+    if (!config) return;
+
+    cJSON* bindings_json = cJSON_GetObjectItem(config, "bindings");
+    if (cJSON_IsArray(bindings_json)) {
+        cJSON* rule_json = NULL;
+        cJSON_ArrayForEach(rule_json, bindings_json) {
+            Binding b;
+            // Parse Trigger
+            cJSON* trigger = cJSON_GetObjectItem(rule_json, "trigger");
+            b.switchId = cJSON_GetObjectItem(trigger, "switchId")->valueint;
+            b.button = cJSON_GetObjectItem(trigger, "button")->valueint;
+            b.onAction = cJSON_GetObjectItem(trigger, "action")->valuestring;
+
+            // Parse Action
+            cJSON* action = cJSON_GetObjectItem(rule_json, "action");
+            if (cJSON_HasObjectItem(action, "output")) {
+                b.targetType = TargetType::OUTPUT;
+                b.outputId = cJSON_GetObjectItem(action, "output")->valueint;
+            } else if (cJSON_HasObjectItem(action, "group")) {
+                b.targetType = TargetType::GROUP;
+                b.groupName = cJSON_GetObjectItem(action, "group")->valuestring;
+            }
+            b.state = cJSON_GetObjectItem(action, "state") ? cJSON_GetObjectItem(action, "state")->valuestring : "";
+            b.brightness = cJSON_GetObjectItem(action, "brightness") ? cJSON_GetObjectItem(action, "brightness")->valueint : -1; // -1 indicates not set
+            b.fade_ms = cJSON_GetObjectItem(action, "fade") ? cJSON_GetObjectItem(action, "fade")->valueint : 0;
+            
+            g_bindings.push_back(b);
+        }
+    }
+    cJSON_Delete(config);
+    ESP_LOGI(TAG, "Loaded %d CAN bindings", g_bindings.size());
+}
 
 
 /*--------------------------- Main Application Entry Point --------------------*/
@@ -572,8 +626,6 @@ void main_task(void *pvParameter)
 
     ESP_LOGI(TAG, "MCP2515 initialized successfully.");
 
-
-
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_NEGEDGE;
     io_conf.pin_bit_mask = (1ULL << PIN_NUM_INT);
@@ -586,6 +638,8 @@ void main_task(void *pvParameter)
     gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
    // gpio_isr_handler_add((gpio_num_t)PIN_NUM_INT, gpio_isr_handler, (void*) (uint32_t) PIN_NUM_INT);
     ESP_ERROR_CHECK(gpio_isr_handler_add((gpio_num_t)PIN_NUM_INT, gpio_isr_handler, (void*)PIN_NUM_INT));
+
+    load_bindings();
 
     while (1) {
         if (mcp2515.checkError()) {
@@ -629,30 +683,39 @@ void main_task(void *pvParameter)
                 // --- FIX: Decode the message using the new protocol ---
                 CanMessageType msgType = getMessageType(can_frame.can_id);
 
-                // 1. Check if this is a lighting command
+                // --- NEW: Rule-matching engine ---
+                // Assume switch sends: [button_num, action_type]
                 if (msgType == LIGHTING_COMMAND) {
-                    // Check if the payload is valid
-                    if (can_frame.can_dlc < 5) continue;
+                    if (can_frame.can_dlc >= 2) {
+                        int switchId = getNodeId(can_frame.can_id);
+                        int button = can_frame.data[0];
+                        const char* action = (can_frame.data[1] == 1) ? "CLICK" : "HOLD"; // Example action mapping
 
-                    CanCommandType cmdType = (CanCommandType)can_frame.data[0];
-                    
-                    // 2. Check which type of lighting command it is
-                    if (cmdType == SET_BRIGHTNESS || cmdType == SET_STATE) {
-                        Command cmd;
-                        cmd.type = TargetType::OUTPUT;
-                        cmd.output_id = can_frame.data[1]; // Target ID
-                        
-                        // For SET_STATE, 1 means ON (100%) and 0 means OFF (0%)
-                        if (cmdType == SET_STATE) {
-                            cmd.brightness = (can_frame.data[2] == 1) ? 100 : 0;
-                        } else {
-                            cmd.brightness = can_frame.data[2]; // Value (Brightness)
+                        // Find a matching rule in our bindings
+                        for (const auto& rule : g_bindings) {
+                            if (rule.switchId == switchId && rule.button == button && rule.onAction == action) {
+                                ESP_LOGI(TAG, "CAN Match Found: Switch %d, Button %d", switchId, button);
+                                
+                                Command cmd;
+                                cmd.type = rule.targetType;
+                                cmd.output_id = rule.outputId;
+                                cmd.group_name = rule.groupName;
+                                cmd.fade_ms = rule.fade_ms;
+
+                                // Handle brightness/state
+                                if (rule.brightness != -1) {
+                                    cmd.brightness = rule.brightness;
+                                } else if (rule.state == "ON") {
+                                    cmd.brightness = 100;
+                                } else if (rule.state == "OFF") {
+                                    cmd.brightness = 0;
+                                }
+                                // TODO: Add "TOGGLE" logic if needed
+
+                                processCommand(cmd);
+                                break; // Stop after finding the first match
+                            }
                         }
-                        
-                        cmd.fade_ms = (can_frame.data[4] << 8) | can_frame.data[3]; // Fade Duration
-
-                        // 3. Call the unified command processor
-                        processCommand(cmd);
                     }
                 }
                 // You could add else if blocks here to handle SENSOR_DATA or HEARTBEAT

@@ -208,6 +208,49 @@ static esp_err_t h_adopt(httpd_req_t* req) {
     return send_json(req, root);
 }
 
+static esp_err_t h_bindings_get(httpd_req_t* req) {
+    cJSON* root = load_cfg_json();
+    ensure_layout(root);
+    cJSON* config = cJSON_GetObjectItem(root, "config");
+    cJSON* bindings = cJSON_GetObjectItem(config, "bindings");
+    if (!bindings) { // Ensure bindings array exists
+        bindings = cJSON_CreateArray();
+    }
+    char* out = cJSON_Print(bindings); // Use Print to keep formatting
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, out ? out : "[]");
+    if (out) free(out);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t h_bindings_post(httpd_req_t* req) {
+    auto body = req_read_all(req);
+    cJSON* posted_bindings = cJSON_Parse(body.c_str());
+    if (!cJSON_IsArray(posted_bindings)) {
+        if(posted_bindings) cJSON_Delete(posted_bindings);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body must be a JSON array");
+    }
+
+    cJSON* root = load_cfg_json();
+    ensure_layout(root);
+    cJSON* config = cJSON_GetObjectItem(root, "config");
+    
+    // Replace the bindings array
+    if (cJSON_HasObjectItem(config, "bindings")) {
+        cJSON_DeleteItemFromObject(config, "bindings");
+    }
+    cJSON_AddItemToObject(config, "bindings", posted_bindings);
+
+    save_cfg_json(root);
+    cJSON_Delete(root);
+    
+    // Tell can_task to reload the bindings
+    // (A simple way is a reboot, a more advanced way is using an event group)
+    return httpd_resp_sendstr(req, "OK");
+}
+
+
 // GET /api/config  (returns ONLY the "config" object)
 static esp_err_t h_config_get(httpd_req_t* req) {
     cJSON* root = load_cfg_json();
@@ -434,6 +477,8 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     httpd_uri_t can_last   { .uri="/api/can/last", .method=HTTP_GET,   .handler=h_can_last,   .user_ctx=nullptr };
     httpd_uri_t ota_post   { .uri="/api/ota",      .method=HTTP_POST,  .handler=h_ota,        .user_ctx=nullptr };
     httpd_uri_t favicon_get = { .uri="/favicon.ico", .method=HTTP_GET, .handler=h_favicon,    .user_ctx=nullptr };
+    httpd_uri_t bindings_get = { .uri="/api/bindings", .method=HTTP_GET, .handler=h_bindings_get, .user_ctx=nullptr };
+    httpd_uri_t bindings_post = { .uri="/api/bindings", .method=HTTP_POST, .handler=h_bindings_post, .user_ctx=nullptr };
 
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &favicon_get));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &adopt_get));
@@ -444,6 +489,8 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &cmd_post));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &can_last));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &ota_post));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &bindings_get));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &bindings_post));
 
     ESP_LOGI(TAG, "API URIs registered");
     return ESP_OK;

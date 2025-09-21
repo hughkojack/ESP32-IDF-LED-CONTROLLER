@@ -49,6 +49,7 @@
             <button class="tab-button active py-2 px-4 rounded-md text-sm font-medium" data-target="deviceInfoSection">Device Info</button>
             <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="i2cMappingSection">I2C Mapping</button>
             <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="groupConfigSection">Groups</button>
+            <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="bindingsSection">CAN Bindings</button>
             <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="networkConfigSection">Network</button>
             <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="commandSection">Command</button>
             <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="advancedSection">Advanced</button>
@@ -90,6 +91,68 @@
                 <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">Group Definitions</h2>
                 <div id="groupContainer" class="space-y-4"></div>
                 <button id="addGroupBtn" class="mt-4 text-sm bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md transition duration-300">Add Group</button>
+            </div>
+
+            <div id="bindingsSection" class="config-section hidden bg-gray-800 p-6 rounded-lg shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">CAN Switch Bindings</h2>
+                <p class="text-sm text-gray-400 mb-6">Map a specific CAN switch button press to an action on an output or group.</p>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm text-left">
+                        <thead class="bg-gray-700 text-xs text-gray-300 uppercase">
+                            <tr>
+                                <th class="px-4 py-3">Trigger (Switch/Button/Action)</th>
+                                <th class="px-4 py-3">Action (Target/Command)</th>
+                                <th class="px-4 py-3"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="bindingsTableBody">
+                        </tbody>
+                    </table> 
+                </div>    
+                <div class="mt-8 border-t border-gray-700 pt-6">
+                    <h3 class="text-lg font-semibold mb-4 text-white">Add New Binding</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                        <div class="space-y-4 p-4 bg-gray-700 rounded-lg">
+                            <h4 class="font-bold text-indigo-400">Trigger</h4>
+                            <div>
+                                <label for="bindSwitchId" class="block">Switch ID</label>
+                                <input type="number" id="bindSwitchId" placeholder="e.g., 3" class="mt-1 w-full bg-gray-600 text-white rounded-md px-3 py-2 border border-gray-500">
+                            </div>
+                            <div>
+                                <label for="bindButton" class="block">Button #</label>
+                                <input type="number" id="bindButton" placeholder="e.g., 1" class="mt-1 w-full bg-gray-600 text-white rounded-md px-3 py-2 border border-gray-500">
+                            </div>
+                            <div>
+                                <label for="bindOnAction" class="block">On Action</label>
+                                <select id="bindOnAction" class="mt-1 w-full bg-gray-600 text-white rounded-md px-3 py-2 border border-gray-500">
+                                    <option>CLICK</option>
+                                    <option>HOLD</option>
+                                    <option>DOUBLE_CLICK</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="space-y-4 p-4 bg-gray-700 rounded-lg">
+                            <h4 class="font-bold text-indigo-400">Action</h4>
+                            <div>
+                                <label for="bindTarget" class="block">Target (Output or Group)</label>
+                                <input type="text" id="bindTarget" placeholder="e.g., 5 or 'Kitchen'" class="mt-1 w-full bg-gray-600 text-white rounded-md px-3 py-2 border border-gray-500">
+                            </div>
+                            <div>
+                                <label for="bindState" class="block">State</label>
+                                <input type="text" id="bindState" placeholder="ON, OFF, or TOGGLE" class="mt-1 w-full bg-gray-600 text-white rounded-md px-3 py-2 border border-gray-500">
+                            </div>
+                            <div>
+                                <label for="bindBrightness" class="block">Brightness (Optional)</label>
+                                <input type="number" id="bindBrightness" placeholder="0-100" class="mt-1 w-full bg-gray-600 text-white rounded-md px-3 py-2 border border-gray-500">
+                            </div>
+                            <div>
+                                <label for="bindFade" class="block">Fade (Optional)</label>
+                                <input type="number" id="bindFade" placeholder="milliseconds" class="mt-1 w-full bg-gray-600 text-white rounded-md px-3 py-2 border border-gray-500">
+                            </div>
+                        </div>
+                    </div>
+                    <button id="addBindingBtn" class="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md transition duration-300">Add Binding</button>
+                </div>
             </div>
 
             <div id="networkConfigSection" class="config-section hidden bg-gray-800 p-6 rounded-lg shadow-lg">
@@ -227,6 +290,18 @@
         const restartBtnText = document.getElementById('restartBtnText');
         const restartSpinner = document.getElementById('restartSpinner');
 
+        const bindingsTableBody = document.getElementById('bindingsTableBody');
+        const addBindingBtn = document.getElementById('addBindingBtn');
+        const bindSwitchId = document.getElementById('bindSwitchId');
+        const bindButton = document.getElementById('bindButton');
+        const bindOnAction = document.getElementById('bindOnAction');
+        const bindTarget = document.getElementById('bindTarget');
+        const bindState = document.getElementById('bindState');
+        const bindBrightness = document.getElementById('bindBrightness');
+        const bindFade = document.getElementById('bindFade');
+
+        let currentBindings = [];
+
         // Reusable HTML template for the save button
         const saveButtonTemplate = `
             <div class="mt-8 bg-gray-800 p-6 rounded-lg shadow-lg border-t border-gray-700">
@@ -247,7 +322,7 @@
                 handleTabClick(event.target);
             }
         });
-
+        addBindingBtn.addEventListener('click', addBinding);
 
         // --- Functions ---
 
@@ -265,13 +340,17 @@
             mainContent.classList.add('hidden');
             navTabs.classList.add('hidden');
             try {
-                const [adoptResponse, configResponse] = await Promise.all([
+                const [adoptResponse, configResponse, bindingsResponse] = await Promise.all([
                     fetch(`/api/adopt`),
-                    fetch(`/api/config`)
+                    fetch(`/api/config`),
+                    fetch(`/api/bindings`)
                 ]);
-                if (!adoptResponse.ok || !configResponse.ok) throw new Error(`HTTP error!`);
+                if (!adoptResponse.ok || !configResponse.ok || !bindingsResponse.ok) throw new Error(`HTTP error!`);
                 const adoptData = await adoptResponse.json();
                 const configData = await configResponse.json();
+                const bindingsData = await bindingsResponse.json();
+                // Add bindings to the config object for populating the UI
+                configData.bindings = bindingsData;
                 populateUI({ ...adoptData, config: configData });
 
                 // Add save buttons to the relevant sections
@@ -361,8 +440,78 @@
                     }
                 }
             }
+
+            // Populate Bindings Table
+            if (data.config && data.config.bindings) {
+                currentBindings = data.config.bindings;
+                renderBindingsTable();
+            }
         }
         
+        /**
+         * Renders the bindings table from the global currentBindings array
+         */
+        function renderBindingsTable() {
+            bindingsTableBody.innerHTML = ''; // Clear table
+            currentBindings.forEach((binding, index) => {
+                const triggerText = `Switch ${binding.trigger.switchId}, Button ${binding.trigger.button} (${binding.trigger.action})`;
+                let actionText = '';
+                if (binding.action.output) {
+                    actionText = `Output ${binding.action.output}`;
+                } else if (binding.action.group) {
+                    actionText = `Group '${binding.action.group}'`;
+                }
+                actionText += ` -> ${binding.action.state || 'brightness ' + binding.action.brightness}`;
+                const row = document.createElement('tr');
+                row.className = 'border-b border-gray-700';
+                row.innerHTML = `
+                    <td class="px-4 py-3 font-mono">${triggerText}</td>
+                    <td class="px-4 py-3 font-mono">${actionText}</td>
+                    <td class="px-4 py-3 text-right">
+                        <button class="remove-binding-btn text-red-400 hover:text-red-300" data-index="${index}">Remove</button>
+                    </td>
+                `;
+                bindingsTableBody.appendChild(row);
+            });
+
+            // Add event listeners to all new "Remove" buttons
+            document.querySelectorAll('.remove-binding-btn').forEach(button => {
+                button.addEventListener('click', removeBinding);
+            });
+        }
+        
+        function addBinding() {
+            const trigger = {
+                switchId: parseInt(bindSwitchId.value),
+                button: parseInt(bindButton.value),
+                action: bindOnAction.value
+            };
+            const action = {};
+            const target = bindTarget.value.trim();
+            if (!isNaN(parseInt(target))) {
+                action.output = parseInt(target);
+            } else {
+                action.group = target;
+            }
+            if (bindState.value) action.state = bindState.value.trim().toUpperCase();
+            if (bindBrightness.value) action.brightness = parseInt(bindBrightness.value);
+            if (bindFade.value) action.fade = parseInt(bindFade.value);
+            if (!trigger.switchId || !trigger.button || !target) {
+                showStatus('Switch ID, Button, and Target are required.', 'error');
+                return;
+            }
+            currentBindings.push({ trigger, action });
+            renderBindingsTable();
+            // Clear form fields
+            bindSwitchId.value = bindButton.value = bindTarget.value = bindState.value = bindBrightness.value = bindFade.value = '';
+        }
+        
+        function removeBinding(event) {
+            const index = parseInt(event.target.dataset.index);
+            currentBindings.splice(index, 1);
+            renderBindingsTable();
+        }
+
         function addGroup(name = '', outputs = []) {
             const groupDiv = document.createElement('div');
             groupDiv.className = 'p-4 border border-gray-700 rounded-lg';
@@ -430,12 +579,19 @@
             setLoadingState(clickedButton, textEl, spinnerEl, true);
             showStatus('Saving all configurations...', 'loading');
             try {
-                const response = await fetch(`/api/config`, {
+                const saveMainConfig = await fetch(`/api/config`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(configToSave)
                 });
-                if (!response.ok) throw new Error(`HTTP error!`);
+                const saveBindings = fetch(`/api/bindings`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(currentBindings)
+                });
+                const [mainResponse, bindingsResponse] = await Promise.all([saveMainConfig, saveBindings]);
+
+                if (!mainResponse.ok || !bindingsResponse.ok) throw new Error(`HTTP error!`);
                 showStatus('Configurations saved successfully! Restart device to apply network changes.', 'success');
             } catch (error) {
                 console.error('Save error:', error);
