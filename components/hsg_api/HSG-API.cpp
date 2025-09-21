@@ -14,7 +14,7 @@
 #include "esp_mac.h"
 #include "nvs_flash.h"
 #include "nvs.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -28,6 +28,8 @@ extern const char _binary_ESP32_POE_html_end[]   asm("_binary_ESP32_POE_html_end
 
 extern const uint8_t _binary_favicon_ico_start[] asm("_binary_favicon_ico_start");
 extern const uint8_t _binary_favicon_ico_end[]   asm("_binary_favicon_ico_end");
+
+extern i2c_master_bus_handle_t i2c_bus_handle;
 
 namespace {
 
@@ -94,7 +96,7 @@ static void ensure_layout(cJSON* root) {
     cJSON* mqtt = cJSON_GetObjectItem(config, "mqtt");
     if (!mqtt) cJSON_AddItemToObject(config, "mqtt", mqtt = cJSON_CreateObject());
 }
-
+/*
 // I2C probe (7-bit)
 static esp_err_t i2c_probe(i2c_port_t port, uint8_t addr7) {
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
@@ -104,13 +106,28 @@ static esp_err_t i2c_probe(i2c_port_t port, uint8_t addr7) {
     esp_err_t ret = i2c_master_cmd_begin(port, cmd, pdMS_TO_TICKS(20));
     i2c_cmd_link_delete(cmd);
     return ret;
+}*/
+
+static esp_err_t i2c_probe(uint8_t addr) {
+    i2c_master_dev_handle_t dev_handle;
+    i2c_device_config_t dev_cfg = {};
+    dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    dev_cfg.device_address = addr;
+    dev_cfg.scl_speed_hz = 100000; // Probe at a safe 100KHz
+
+    esp_err_t ret = i2c_master_bus_add_device(i2c_bus_handle, &dev_cfg, &dev_handle);
+    if (ret == ESP_OK) {
+        i2c_master_bus_rm_device(dev_handle); // Clean up immediately after successful probe
+    }
+    return ret;
 }
+
 
 static std::vector<uint8_t> scan_pca9685_addrs(i2c_port_t port) {
     std::vector<uint8_t> found;
     for (uint8_t addr = 0x40; addr <= 0x7F; ++addr) {
         if (addr == 0x70) continue; // ignore All-Call
-        if (i2c_probe(port, addr) == ESP_OK) {
+        if (i2c_probe(addr) == ESP_OK) {
 //            ESP_LOGI(TAG, "Found I2C device at 0x%02X", addr);
             found.push_back(addr);
         }
@@ -178,7 +195,7 @@ static esp_err_t h_adopt(httpd_req_t* req) {
 
     // PCA9685 valid range: 0x40–0x47 (7-bit address space)
     for (uint8_t addr = 0x40; addr <= 0x47; ++addr) {
-        if (i2c_probe((i2c_port_t) g_init.i2c_port, addr) == ESP_OK) {
+        if (i2c_probe(addr) == ESP_OK) {
             ESP_LOGI(TAG, "Adopt: Found PCA9685 at 0x%02X", addr);
             cJSON_AddItemToArray(pca, cJSON_CreateNumber(addr));
         }

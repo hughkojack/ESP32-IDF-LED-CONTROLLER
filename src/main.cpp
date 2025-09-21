@@ -18,7 +18,8 @@ extern "C" {
 #include "freertos/queue.h"
 #include "freertos/event_groups.h"
 #include "driver/gpio.h"
-#include "driver/i2c.h"
+//#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "driver/spi_master.h"
 #include "esp_log.h"
 #include "esp_err.h"
@@ -51,6 +52,7 @@ static const int WIFI_CONNECTED_BIT = BIT1;
 static bool s_eth_connected = false;
 static bool s_wifi_connected = false;
 static esp_mqtt_client_handle_t mqtt_client;
+i2c_master_bus_handle_t i2c_bus_handle;
 
 /* ---------------------- Global State for Commands and Fading ---------------------- */
 enum class TargetType { OUTPUT, GROUP };
@@ -460,7 +462,7 @@ void processFades() {
                 // Get the physical address from our mapping component
                 if (hsg_outputs_get_mapping(i + 1, &addr, &channel)) {
                     // Send the raw value to the hardware driver
-                    esp_err_t result = pca9685_write_pwm_value(I2C_MASTER_NUM, addr, channel, newPwmValue);
+                    esp_err_t result = hsg_pca9685::pca9685_write_pwm_value(addr, channel, newPwmValue);
                     
                     if (result != ESP_OK) {
                         ESP_LOGE(TAG, "Failed to write PWM value to PCA@0x%02X ch%d. Error: %s", addr, channel, esp_err_to_name(result));
@@ -680,7 +682,7 @@ static void IRAM_ATTR gpio_isr_handler(void* arg) {
     xQueueSendFromISR(gpio_evt_queue, &gpio_num, nullptr);
 }
 
-
+/*
 static esp_err_t i2c_master_init(void) {
     i2c_config_t conf = {};
     conf.mode = I2C_MODE_MASTER;
@@ -692,6 +694,19 @@ static esp_err_t i2c_master_init(void) {
     esp_err_t err = i2c_param_config(I2C_MASTER_NUM, &conf);
     if (err != ESP_OK) return err;
     return i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0);
+}
+*/
+static esp_err_t i2c_master_init(void) {
+    i2c_master_bus_config_t i2c_mst_config = {};
+    i2c_mst_config.clk_source = I2C_CLK_SRC_DEFAULT;
+    i2c_mst_config.i2c_port = I2C_MASTER_NUM;
+    i2c_mst_config.scl_io_num = (gpio_num_t)I2C_MASTER_SCL_IO;
+    i2c_mst_config.sda_io_num = (gpio_num_t)I2C_MASTER_SDA_IO;
+    //i2c_mst_config.glitch_filter_ns = -1;
+    i2c_mst_config.flags.enable_internal_pullup = true;
+
+    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &i2c_bus_handle));
+    return ESP_OK;
 }
 
 httpd_handle_t web_start() {

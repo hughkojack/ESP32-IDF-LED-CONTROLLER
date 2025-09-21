@@ -75,7 +75,7 @@ esp_err_t hsg_outputs_init(int i2c_port, cJSON* config_json) {
         // Initialize each unique chip
         for (uint8_t addr : addresses) {
             // Call your existing init function
-            esp_err_t result = pca9685_init(static_cast<i2c_port_t>(g_i2c_port), addr, 1000); // 1kHz frequency
+            esp_err_t result = hsg_pca9685::pca9685_init(addr, 1000); // 1kHz frequency
             if (result == ESP_OK) {
                 ESP_LOGI(TAG, "   ...success.");
             } else {
@@ -121,7 +121,7 @@ void hsg_outputs_clear_all() {
         // A more advanced way would be to probe first, but this is simple and effective.
         for (uint8_t channel = 0; channel < 16; ++channel) {
             // g_i2c_port is set during hsg_outputs_init()
-            pca9685_write_pwm_value(static_cast<i2c_port_t>(g_i2c_port), addr, channel, 0);
+            hsg_pca9685::pca9685_write_pwm_value(addr, channel, 0);
         }
     }
 }
