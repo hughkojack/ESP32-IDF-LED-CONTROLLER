@@ -96,6 +96,17 @@ static void ensure_layout(cJSON* root) {
     cJSON* mqtt = cJSON_GetObjectItem(config, "mqtt");
     if (!mqtt) cJSON_AddItemToObject(config, "mqtt", mqtt = cJSON_CreateObject());
 }
+
+// Probe an I2C address using the ESP-IDF v5+ I²C master API
+static esp_err_t i2c_probe(i2c_master_bus_handle_t bus, uint8_t addr7) {
+    // i2c_master_probe() returns ESP_OK if the device ACKs
+    esp_err_t ret = i2c_master_probe(bus, addr7, pdMS_TO_TICKS(100));
+    if (ret == ESP_OK) {
+        ESP_LOGI("HSG-API", "Found I2C device at 0x%02X", addr7);
+    }
+    return ret;
+}
+
 /*
 // I2C probe (7-bit)
 static esp_err_t i2c_probe(i2c_port_t port, uint8_t addr7) {
@@ -106,28 +117,31 @@ static esp_err_t i2c_probe(i2c_port_t port, uint8_t addr7) {
     esp_err_t ret = i2c_master_cmd_begin(port, cmd, pdMS_TO_TICKS(20));
     i2c_cmd_link_delete(cmd);
     return ret;
-}*/
+}
 
 static esp_err_t i2c_probe(uint8_t addr) {
+    esp_err_t ret = ESP_FAIL; 
     i2c_master_dev_handle_t dev_handle;
     i2c_device_config_t dev_cfg = {};
     dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
     dev_cfg.device_address = addr;
     dev_cfg.scl_speed_hz = 100000; // Probe at a safe 100KHz
-
-    esp_err_t ret = i2c_master_bus_add_device(i2c_bus_handle, &dev_cfg, &dev_handle);
+    if (xSemaphoreTake(i2c_mutex, pdMS_TO_TICKS(100))) { // Wait up to 100ms
+        ret = i2c_master_bus_add_device(i2c_bus_handle, &dev_cfg, &dev_handle);
+        xSemaphoreGive(i2c_mutex); // Release the lock
+    }
     if (ret == ESP_OK) {
         i2c_master_bus_rm_device(dev_handle); // Clean up immediately after successful probe
     }
     return ret;
 }
-
+*/
 
 static std::vector<uint8_t> scan_pca9685_addrs(i2c_port_t port) {
     std::vector<uint8_t> found;
-    for (uint8_t addr = 0x40; addr <= 0x7F; ++addr) {
+    for (uint8_t addr = 0x40; addr <= 0x47; ++addr) {
         if (addr == 0x70) continue; // ignore All-Call
-        if (i2c_probe(addr) == ESP_OK) {
+        if (i2c_probe(i2c_bus_handle, addr) == ESP_OK) {
 //            ESP_LOGI(TAG, "Found I2C device at 0x%02X", addr);
             found.push_back(addr);
         }
@@ -194,14 +208,19 @@ static esp_err_t h_adopt(httpd_req_t* req) {
     cJSON* pca = cJSON_CreateArray();
 
     // PCA9685 valid range: 0x40–0x47 (7-bit address space)
-    for (uint8_t addr = 0x40; addr <= 0x47; ++addr) {
-        if (i2c_probe(addr) == ESP_OK) {
-            ESP_LOGI(TAG, "Adopt: Found PCA9685 at 0x%02X", addr);
-            cJSON_AddItemToArray(pca, cJSON_CreateNumber(addr));
+    for (uint32_t a = 0x40; a <= 0x47; ++a) {
+        if (i2c_probe(i2c_bus_handle, (uint8_t)a) == ESP_OK) {
+            cJSON_AddItemToArray(pca, cJSON_CreateNumber(a));
         }
         vTaskDelay(pdMS_TO_TICKS(2));
     }
-
+//    for (uint8_t addr = 0x40; addr <= 0x47; ++addr) {
+//        if (i2c_probe(addr) == ESP_OK) {
+//            ESP_LOGI(TAG, "Adopt: Found PCA9685 at 0x%02X", addr);
+//            cJSON_AddItemToArray(pca, cJSON_CreateNumber(addr));
+//        }
+//        vTaskDelay(pdMS_TO_TICKS(2));
+//    }
     cJSON_AddItemToObject(i2c, "pca9685", pca);
     cJSON_AddItemToObject(root, "i2c", i2c);
 

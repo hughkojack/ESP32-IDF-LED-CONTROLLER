@@ -384,7 +384,8 @@
             sysSketch.textContent = data.system?.sketchSpaceUsedBytes || '-';
 
             i2cMapping.innerHTML = '';
-            if (data.i2c?.pca9685?.length > 0) {
+            if (data.i2c && Array.isArray(data.i2c.pca9685) && data.i2c.pca9685.length > 0) {
+//            if (data.i2c?.pca9685?.length > 0) {
                 data.i2c.pca9685.forEach(addr => {
                     const hexAddr = `0x${addr.toString(16)}`;
                     const deviceContainer = document.createElement('div');

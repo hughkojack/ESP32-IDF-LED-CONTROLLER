@@ -54,7 +54,7 @@ static bool s_eth_connected = false;
 static bool s_wifi_connected = false;
 static esp_mqtt_client_handle_t mqtt_client;
 i2c_master_bus_handle_t i2c_bus_handle;
-
+SemaphoreHandle_t i2c_mutex;
 
 /* ---------------------- Global State for Commands and Fading ---------------------- */
 enum class TargetType { OUTPUT, GROUP };
@@ -480,11 +480,14 @@ void processFades() {
                 uint8_t channel;
                 // Get the physical address from our mapping component
                 if (hsg_outputs_get_mapping(i + 1, &addr, &channel)) {
-                    // Send the raw value to the hardware driver
-                    esp_err_t result = hsg_pca9685::pca9685_write_pwm_value(addr, channel, newPwmValue);
-                    
-                    if (result != ESP_OK) {
-                        ESP_LOGE(TAG, "Failed to write PWM value to PCA@0x%02X ch%d. Error: %s", addr, channel, esp_err_to_name(result));
+                    if (xSemaphoreTake(i2c_mutex, portMAX_DELAY)) {
+                        // Send the raw value to the hardware driver
+                        esp_err_t result = hsg_pca9685::pca9685_write_pwm_value(addr, channel, newPwmValue);
+                        xSemaphoreGive(i2c_mutex); // Release the lock
+
+                        if (result != ESP_OK) {
+                            ESP_LOGE(TAG, "Failed to write PWM value to PCA@0x%02X ch%d. Error: %s", addr, channel, esp_err_to_name(result));
+                        }
                     }
                 }
             }
@@ -532,6 +535,8 @@ static void load_bindings() {
 /*--------------------------- Main Application Entry Point --------------------*/
 extern "C" void app_main(void) {
     ESP_LOGI(TAG, "Starting up...");
+
+    i2c_mutex = xSemaphoreCreateMutex();
 
     // 1. Initialize NVS (must be first)
     esp_err_t ret = nvs_flash_init();
@@ -765,6 +770,7 @@ static esp_err_t i2c_master_init(void) {
     i2c_mst_config.i2c_port = I2C_MASTER_NUM;
     i2c_mst_config.scl_io_num = (gpio_num_t)I2C_MASTER_SCL_IO;
     i2c_mst_config.sda_io_num = (gpio_num_t)I2C_MASTER_SDA_IO;
+    i2c_mst_config.glitch_ignore_cnt = 7;
     //i2c_mst_config.glitch_filter_ns = -1;
     i2c_mst_config.flags.enable_internal_pullup = true;
 
