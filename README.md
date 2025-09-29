@@ -85,17 +85,19 @@ Endpoint	Method	Description
 
 ## 📂 Repository Structure
 
+```
 ESP32-IDF-LED-CONTROLLER/
 ├── components/
-│ ├── hsg_api/ # API + web server logic
-│ ├── mcp2515/ # CAN bus driver
-│ └── cJSON/ # JSON support
+│   ├── hsg_api/          # API + web server logic
+│   ├── mcp2515/          # CAN bus driver  
+│   └── cJSON/            # JSON support
 ├── src/
-│ └── main.cpp # Main application logic
-├── ESP32-POE.html # Web interface (embedded in firmware)
-├── README.md # Project documentation
-├── CMakeLists.txt # Build configuration
-└── sdkconfig # ESP-IDF project config
+│   ├── main.cpp          # Main application logic
+│   └── ESP32-POE.html    # Web interface (embedded in firmware)
+├── README.md             # Project documentation
+├── CMakeLists.txt        # Build configuration
+└── sdkconfig             # ESP-IDF project config
+```
 
 ### Notes
 - ⚡ The ESP32 will **prefer Ethernet** if connected, and fall back to **Wi-Fi** otherwise.  
