@@ -127,14 +127,14 @@ Key Features:
 
 2. Real-Time, Bi-Directional Feedback: The page immediately establishes a WebSocket connection to the ESP32 Hub.
 
-ESP32 to Browser: Whenever a light's state changes—regardless of whether the command came from a physical CAN switch, an MQTT message, or the web UI itself—the Hub broadcasts a status update over the WebSocket. The JavaScript on the page receives this message and instantly updates the corresponding button and slider to reflect the true state of the physical light.
+- ESP32 to Browser: Whenever a light's state changes—regardless of whether the command came from a physical CAN switch, an MQTT message, or the web UI itself—the Hub broadcasts a status update over the WebSocket. The JavaScript on the page receives this message and instantly updates the corresponding button and slider to reflect the true state of the physical light.
 
-Browser to ESP32: User interactions on the page (clicking a button or moving a slider) send commands to the /api/command endpoint to control the lights.
+- Browser to ESP32: User interactions on the page (clicking a button or moving a slider) send commands to the /api/command endpoint to control the lights.
 
 3. Comprehensive Control: The interface provides control over both groups and individual lights:
 
-    Group Control: Each accordion section has a master "All" button to toggle the entire group on or off.
+- Group Control: Each accordion section has a master "All" button to toggle the entire group on or off.
 
-    Individual Control: Inside each group, every light has its own power toggle icon, a descriptive label, and a "glowing track" slider for fine-grained brightness control (0-100%).
+- Individual Control: Inside each group, every light has its own power toggle icon, a descriptive label, and a "glowing track" slider for fine-grained brightness control (0-100%).
 
 This implementation creates a seamless and intuitive user experience, ensuring the web interface is always a perfect, real-time mirror of the lighting system's actual state.
