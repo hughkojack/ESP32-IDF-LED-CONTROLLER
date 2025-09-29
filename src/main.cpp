@@ -19,7 +19,6 @@ extern "C" {
 #include "freertos/queue.h"
 #include "freertos/event_groups.h"
 #include "driver/gpio.h"
-//#include "driver/i2c.h"
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
 #include "esp_log.h"
@@ -31,14 +30,14 @@ extern "C" {
 #include "esp_http_server.h"
 #include "cJSON.h"
 #include "esp_eth.h"
-#include "esp_eth_phy.h"
 #include "esp_eth_mac.h"
-#include "mqtt_client.h"
+#include "esp_eth_phy.h"
+#include "esp_eth_driver.h"
 
+#include "can_protocol.h"
 #include "HSG-API.h"
 #include "hsg_outputs.h"
 #include "hsg_pca9685.h"
-#include "can_protocol.h"
 
 static const char *TAG = "MAIN";
 
@@ -46,43 +45,80 @@ static const char *TAG = "MAIN";
 #define MAX_OUTPUTS 160
 #define DEFAULT_FADE_MS 1000
 
+// --- Olimex ESP32-POE wiring ---
+#if defined(BOARD_OLIMEX_POE)
+    #define ETH_PHY_PWR_GPIO 12
+    #define I2C_MASTER_SCL_IO 16
+    #define I2C_MASTER_SDA_IO 13
+    #define PIN_NUM_CS        5 // For CAN
+    #pragma message "Compiling for Olimex ESP32-POE"
+#elif defined(BOARD_RACK32)
+    // --- Rack32 GPIOs ---
+    #define W5500_HOST        SPI2_HOST
+    #define W5500_MOSI_GPIO   23
+    #define W5500_MISO_GPIO   19
+    #define W5500_SCLK_GPIO   18
+    #define W5500_CS_GPIO     5
+    #define W5500_INT_GPIO    4
+    #define I2C_MASTER_SCL_IO 22
+    #define I2C_MASTER_SDA_IO 21
+    #define PIN_NUM_CS        25 // For CAN
+    #pragma message "Compiling for Rack32"
+#else
+    #error "No board defined. Please define BOARD_OLIMEX_POE or BOARD_RACK32 in CMakeLists.txt" 
+#endif
+
+// --- Common Pin Definitions ---
+
+#define ETH_MDC_GPIO      23
+#define ETH_MDIO_GPIO     18
+#define ETH_PHY_ADDR      0
+#define I2C_MASTER_NUM    I2C_NUM_0
+#define I2C_MASTER_FREQ_HZ 400000
+#define SPI_HOST_CAN      SPI2_HOST // Explicitly name for clarity
+#define PIN_NUM_MISO_CAN  33
+#define PIN_NUM_MOSI_CAN  32
+#define PIN_NUM_CLK_CAN   4
+#define PIN_NUM_INT_CAN   35
+#define ETH_RST_GPIO     -1
+
 // --- Global State for Network Failover ---
 static EventGroupHandle_t s_net_event_group;
 static const int ETH_CONNECTED_BIT = BIT0;
 static const int WIFI_CONNECTED_BIT = BIT1;
 static bool s_eth_connected = false;
 static bool s_wifi_connected = false;
-static esp_mqtt_client_handle_t mqtt_client;
+static esp_netif_t *s_eth_netif = NULL;
+static esp_netif_t *s_wifi_netif = NULL;
 i2c_master_bus_handle_t i2c_bus_handle;
-SemaphoreHandle_t i2c_mutex;
+static spi_device_handle_t mcp_spi_handle;
+static QueueHandle_t gpio_evt_queue = nullptr;
 
-/* ---------------------- Global State for Commands and Fading ---------------------- */
+// --- Application Structs & Data ---
 enum class TargetType { OUTPUT, GROUP };
-
-struct Binding {
-    // The Trigger (what button was pressed)
-    int switchId;
-    int button;
-    std::string onAction; // e.g., "CLICK", "HOLD"
-
-    // The Action (what to do)
-    TargetType targetType; // OUTPUT or GROUP
-    int outputId;
-    std::string groupName;
-    std::string state; // "ON", "OFF", "TOGGLE"
-    int brightness;
-    int fade_ms;
-};
-// A vector to hold all the rules loaded from config
-static std::vector<Binding> g_bindings;
-
 struct Command {
-    TargetType type = TargetType::OUTPUT;
+    TargetType type;
     int output_id = 0;
     std::string group_name;
     int brightness = 0;
     int fade_ms = 0;
+    std::string state;
 };
+
+struct Binding {
+    int switchId;
+    int button;
+    std::string onAction;
+    TargetType targetType;
+    int outputId;
+    std::string groupName;
+    std::string state;
+    int brightness;
+    int fade_ms;
+};
+
+// A vector to hold all the rules loaded from config
+static std::vector<Binding> g_bindings;
 
 struct OutputState {
     int startPwmValue = 0;
@@ -92,75 +128,188 @@ struct OutputState {
     unsigned long fadeDuration = DEFAULT_FADE_MS;
 };
 OutputState outputs[MAX_OUTPUTS];
+
+//------------------------------------------------------------------------
 int outputBrightness[MAX_OUTPUTS] = {0}; // Last "ON" brightness (0-100)
-
-// MQTT client handle
-//static esp_mqtt_client_handle_t mqtt_client;
-
-
-// --- Olimex ESP32-POE wiring ---
-#define ETH_MDC_GPIO               23
-#define ETH_MDIO_GPIO              18
-#define ETH_PHY_ADDR               0
-#define ETH_RST_GPIO               -1
-#define ETH_PHY_PWR_GPIO           12
-#define ETH_PHY_POWER_ACTIVE_HIGH  1
-
-/* ---------------------- I2C Configuration ---------------------- */
-#define I2C_MASTER_SCL_IO   16
-#define I2C_MASTER_SDA_IO   13
-#define I2C_MASTER_NUM      I2C_NUM_0
-#define I2C_MASTER_FREQ_HZ  400000
-
-
-/* ---------------------- SPI/MCP2515 Configuration ---------------------- */
-#define SPI_HOST SPI2_HOST
-#define PIN_NUM_MISO 33
-#define PIN_NUM_MOSI 32
-#define PIN_NUM_CLK  4
-#define PIN_NUM_CS   5
-#define PIN_NUM_INT  35
-
-static QueueHandle_t gpio_evt_queue = nullptr;
-static spi_device_handle_t mcp_spi_handle;
 static can_frame g_last_frame = {};
 static SemaphoreHandle_t g_last_mutex;
+//-----------------------------------------------------------------------
 
-static esp_netif_t *s_eth_netif = NULL;
-static esp_netif_t *s_wifi_netif = NULL;
-
-/*--------------------------- Function Prototypes ---------------------------*/
+/*--------------------------- Function Declarations ---------------------------*/
 static esp_err_t i2c_master_init(void);
 void main_task(void *pvParameter);
 void animation_task(void *pvParameter);
 static void IRAM_ATTR gpio_isr_handler(void* arg);
-//static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
-//static void ip_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
 static void wifi_start(void);
-static void eth_start(void);
 void setOutput(int output, int brightness, int fadeMs);
 
+// --- Core Logic ---
+void setOutput(int output, int brightness, int fadeMs) {
+    int outputIndex = output - 1;
+    if (outputIndex < 0 || outputIndex >= MAX_OUTPUTS) return;
 
-void processFades();
+    // Set up the parameters for the animation engine
+    outputs[outputIndex].startPwmValue = outputs[outputIndex].currentPwmValue;
+    outputs[outputIndex].targetPwmValue = (int)roundf(brightness / 100.0f * 4095.0f);
+    outputs[outputIndex].fadeStartTime = esp_log_timestamp();
+    outputs[outputIndex].fadeDuration = (fadeMs > 0) ? fadeMs : 1; // Prevent division by zero
 
-static void phy_power_set(bool on) {
-    static bool inited = false;
-    if (!inited) {
-        gpio_config_t io = {};
-        io.pin_bit_mask = 1ULL << ETH_PHY_PWR_GPIO;
-        io.mode = GPIO_MODE_OUTPUT;
-        gpio_config(&io);
-        inited = true;
+    // Store the last "ON" brightness for stateful commands
+    if (brightness > 0) {
+        outputBrightness[outputIndex] = brightness;
     }
-    gpio_set_level((gpio_num_t)ETH_PHY_PWR_GPIO, on ? 1 : 0);
 }
 
-/* ---------------------- Network Initialization ---------------------- */
-// --- Unified Network Event Handler with Failback Logic ---
+void processFades() {
+    for (int i = 0; i < MAX_OUTPUTS; i++) {
+        // Check if a fade is active for this output
+        if (outputs[i].currentPwmValue != outputs[i].targetPwmValue) {
+            unsigned long elapsedTime = esp_log_timestamp() - outputs[i].fadeStartTime;
+            int newPwmValue;
+
+            if (elapsedTime >= outputs[i].fadeDuration) {
+                // Fade is complete, snap to the target value
+                newPwmValue = outputs[i].targetPwmValue;
+            } else {
+                // Fade is in progress, calculate the intermediate value (linear interpolation)
+                float progress = (float)elapsedTime / (float)outputs[i].fadeDuration;
+                newPwmValue = outputs[i].startPwmValue + (progress * (outputs[i].targetPwmValue - outputs[i].startPwmValue));
+            }
+
+            // Only update the physical PWM chip if the value has actually changed
+            if (newPwmValue != outputs[i].currentPwmValue) {
+                outputs[i].currentPwmValue = newPwmValue;
+                
+                uint8_t addr;
+                uint8_t channel;
+                // Get the physical address from our mapping component
+                if (hsg_outputs_get_mapping(i + 1, &addr, &channel)) {
+                    esp_err_t result = hsg_pca9685::pca9685_write_pwm_value(addr, channel, newPwmValue);
+                    if (result != ESP_OK) {
+                        ESP_LOGE(TAG, "Failed to write PWM value to PCA@0x%02X ch%d. Error: %s", addr, channel, esp_err_to_name(result));
+                    }
+                }
+            }
+        }
+    }
+}
+
+void processCommand(const Command& cmd) {
+    ESP_LOGI(TAG, "Processing command for %s: %s%d, state=%s, brightness=%d, fade=%dms",
+             (cmd.type == TargetType::OUTPUT) ? "output" : "group",
+             (cmd.type == TargetType::OUTPUT) ? "" : cmd.group_name.c_str(),
+             cmd.output_id,
+             cmd.state.c_str(),
+             cmd.brightness,
+             cmd.fade_ms);
+
+    int final_brightness;
+    if (cmd.state == "ON") {
+        final_brightness = 100;
+    } else if (cmd.state == "OFF") {
+        final_brightness = 0;
+    } else if (cmd.state == "TOGGLE") {
+        // For a group, we can determine the toggle state based on its first member
+        int output_to_check = (cmd.type == TargetType::OUTPUT) ? cmd.output_id : 0;
+        if (cmd.type == TargetType::GROUP) {
+            cJSON* config = HSG::API::get_config_json_obj();
+            if (config) {
+                cJSON* groups = cJSON_GetObjectItem(config, "groups");
+                cJSON* group_outputs = cJSON_GetObjectItem(groups, cmd.group_name.c_str());
+                if (cJSON_IsArray(group_outputs) && cJSON_GetArraySize(group_outputs) > 0) {
+                    output_to_check = cJSON_GetArrayItem(group_outputs, 0)->valueint;
+                }
+                cJSON_Delete(config);
+            }
+        }
+        if (output_to_check > 0) {
+            int target_pwm = outputs[output_to_check - 1].targetPwmValue;
+            final_brightness = (target_pwm > 0) ? 0 : 100;
+        } else {
+            final_brightness = 100; // Default to ON if group is empty or invalid
+        }
+    } else {
+        // If no state is provided, use the brightness from the command
+        final_brightness = cmd.brightness;
+    }
+
+    ESP_LOGW(TAG, "brightness '%d' ", final_brightness);
+
+    if (cmd.type == TargetType::OUTPUT) {
+        setOutput(cmd.output_id, final_brightness, cmd.fade_ms);
+
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddStringToObject(root, "type", "state");
+        cJSON_AddNumberToObject(root, "output", cmd.output_id);
+        cJSON_AddNumberToObject(root, "brightness", final_brightness);
+        char* json_str = cJSON_PrintUnformatted(root);
+        HSG::API::send_ws_message(std::string(json_str));
+        cJSON_Delete(root);
+        free(json_str);
+    } else if (cmd.type == TargetType::GROUP) {
+        cJSON* config = HSG::API::get_config_json_obj();
+        if (!config) {
+            ESP_LOGE(TAG, "Failed to get config to process group command.");
+            return;
+        }
+
+        cJSON* groups = cJSON_GetObjectItem(config, "groups");
+        cJSON* group_outputs = cJSON_GetObjectItem(groups, cmd.group_name.c_str());
+
+        if (cJSON_IsArray(group_outputs)) {
+            cJSON* output_item = NULL;
+            cJSON_ArrayForEach(output_item, group_outputs) {
+                if (cJSON_IsNumber(output_item)) {
+                    int output_id = output_item->valueint;
+                    setOutput(output_id, final_brightness, cmd.fade_ms);
+
+                    // This part is correct: it updates the individual light buttons
+                    cJSON* individual_update = cJSON_CreateObject();
+                    cJSON_AddStringToObject(individual_update, "type", "state");
+                    cJSON_AddNumberToObject(individual_update, "output", output_id);
+                    cJSON_AddNumberToObject(individual_update, "brightness", final_brightness);
+                    char* json_str = cJSON_PrintUnformatted(individual_update);
+                    HSG::API::send_ws_message(std::string(json_str));
+                    cJSON_Delete(individual_update);
+                    free(json_str);
+
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                }
+            }
+
+            // --- FIX: After the loop, broadcast the update for the group itself ---
+            cJSON* group_update = cJSON_CreateObject();
+            cJSON_AddStringToObject(group_update, "type", "state");
+            cJSON_AddStringToObject(group_update, "group", cmd.group_name.c_str());
+            cJSON_AddNumberToObject(group_update, "brightness", final_brightness);
+            char* json_str_group = cJSON_PrintUnformatted(group_update);
+            HSG::API::send_ws_message(std::string(json_str_group));
+            cJSON_Delete(group_update);
+            free(json_str_group);
+
+        } else {
+            ESP_LOGW(TAG, "Group '%s' not found in configuration.", cmd.group_name.c_str());
+        }
+        cJSON_Delete(config);
+    }
+}
+/* ---------------------- Network Logic ---------------------- */
+static void phy_power_set(bool on) {
+    #if defined(BOARD_OLIMEX_POE)
+        static bool inited = false;
+        if (!inited) {
+            gpio_config_t io = {};
+            io.pin_bit_mask = 1ULL << ETH_PHY_PWR_GPIO;
+            io.mode = GPIO_MODE_OUTPUT;
+            gpio_config(&io);
+            inited = true;
+        }
+        gpio_set_level((gpio_num_t)ETH_PHY_PWR_GPIO, on ? 1 : 0);
+    #endif    
+}
+
 static void net_event_handler(void* arg, esp_event_base_t event_base,
-                              int32_t event_id, void* event_data)
-{
-    // --- Ethernet Events ---
+                              int32_t event_id, void* event_data) {
     if (event_base == ETH_EVENT) {
         if (event_id == ETHERNET_EVENT_CONNECTED) {
             ESP_LOGI(TAG, "Ethernet Link Up");
@@ -175,8 +324,6 @@ static void net_event_handler(void* arg, esp_event_base_t event_base,
             wifi_start();
         }
     }
-
-    // --- Wi-Fi Events ---
     if (event_base == WIFI_EVENT) {
         if (event_id == WIFI_EVENT_STA_START) {
             // FIX: This is the critical missing piece.
@@ -190,9 +337,8 @@ static void net_event_handler(void* arg, esp_event_base_t event_base,
             }
         }
     }
-
-    // --- IP Address Events ---
     if (event_base == IP_EVENT) {
+        esp_mqtt_client_handle_t mqtt_client = HSG::API::get_mqtt_client();
         if (event_id == IP_EVENT_ETH_GOT_IP) {
             ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
             ESP_LOGI(TAG, "Ethernet Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
@@ -214,8 +360,7 @@ static void net_event_handler(void* arg, esp_event_base_t event_base,
 }
 
 
-
-// --- Ethernet Start Function ---
+#if defined(BOARD_OLIMEX_POE)
 static void eth_start(void)
 {
     // Create Ethernet network interface
@@ -228,14 +373,10 @@ static void eth_start(void)
     phy_power_set(true);
     vTaskDelay(pdMS_TO_TICKS(50));  // let 3V3 & XO settle
 
-    // Configure Ethernet MAC and PHY
     eth_esp32_emac_config_t esp32_emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
     esp32_emac_config.smi_mdc_gpio_num = ETH_MDC_GPIO;
     esp32_emac_config.smi_mdio_gpio_num = ETH_MDIO_GPIO;
-
-    // FIX: Create the generic MAC config
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
-
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
     phy_config.phy_addr = ETH_PHY_ADDR;
     phy_config.reset_gpio_num = ETH_RST_GPIO;
@@ -247,23 +388,34 @@ static void eth_start(void)
 
     // Install Ethernet driver
     esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&esp32_emac_config, &mac_config);
-
     esp_eth_phy_t *phy = esp_eth_phy_new_lan87xx(&phy_config);
     esp_eth_config_t config = ETH_DEFAULT_CONFIG(mac, phy);
     esp_eth_handle_t eth_handle = NULL;
     ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
-
-    // Attach Ethernet driver to TCP/IP stack
-    // Create the glue layer between the MAC and the TCP/IP stack
     void *glue = esp_eth_new_netif_glue(eth_handle);
-
-    // Attach the Ethernet driver to the TCP/IP stack
     ESP_ERROR_CHECK(esp_netif_attach(eth_netif, glue));
-    
-    
-    // Start Ethernet driver state machine
     ESP_ERROR_CHECK(esp_eth_start(eth_handle));
 }
+#elif defined(BOARD_RACK32)
+static void eth_start(void) {
+    spi_bus_config_t buscfg = { .mosi_io_num = W5500_MOSI_GPIO, .miso_io_num = W5500_MISO_GPIO, .sclk_io_num = W5500_SCLK_GPIO, .quadwp_io_num = -1, .quadhd_io_num = -1 };
+    ESP_ERROR_CHECK(spi_bus_initialize(W5500_HOST, &buscfg, SPI_DMA_CH_AUTO));
+    s_eth_netif = esp_netif_new(& (esp_netif_config_t)ESP_NETIF_DEFAULT_ETH());
+    spi_device_interface_config_t devcfg = { .mode = 0, .clock_speed_hz = 25 * 1000 * 1000, .spics_io_num = W5500_CS_GPIO, .queue_size = 20 };
+    eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(W5500_HOST, &devcfg);
+    w5500_config.int_gpio_num = W5500_INT_GPIO;
+    eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
+    eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
+    esp_eth_mac_t *mac = esp_eth_mac_new_w5500(&w5500_config, &mac_config);
+    esp_eth_phy_t *phy = esp_eth_phy_new_w5500(&phy_config);
+    esp_eth_config_t config = ETH_DEFAULT_CONFIG(mac, phy);
+    esp_eth_handle_t eth_handle = NULL;
+    ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
+    void *glue = esp_eth_new_netif_glue(eth_handle);
+    ESP_ERROR_CHECK(esp_netif_attach(s_eth_netif, glue));
+    ESP_ERROR_CHECK(esp_eth_start(eth_handle));
+}
+#endif
 
 // --- Wi-Fi Start Function ---
 static void wifi_start(void)
@@ -369,12 +521,26 @@ httpd_handle_t web_server_start(void) {
     return NULL;
 }
 
+// This function can be called by the API to get the current state
+cJSON* get_current_outputs_json() {
+    cJSON* outputs_json = cJSON_CreateObject();
+    for (int i = 0; i < MAX_OUTPUTS; ++i) {
+        // Only include outputs that are on to keep the payload small
+        if (outputs[i].currentPwmValue > 0) {
+            char key[5];
+            snprintf(key, sizeof(key), "%d", i + 1);
+            cJSON_AddNumberToObject(outputs_json, key, outputs[i].currentPwmValue);
+        }
+    }
+    return outputs_json; // The caller is responsible for deleting this object
+}
+
 /* ---------------------- Hardware & Network Init ---------------------- */
 static esp_err_t spi_master_init(void) {
     spi_bus_config_t buscfg = {
-        .mosi_io_num = PIN_NUM_MOSI,
-        .miso_io_num = PIN_NUM_MISO,
-        .sclk_io_num = PIN_NUM_CLK,
+        .mosi_io_num = PIN_NUM_MOSI_CAN,
+        .miso_io_num = PIN_NUM_MISO_CAN,
+        .sclk_io_num = PIN_NUM_CLK_CAN,
         .quadwp_io_num = -1, // Not used
         .quadhd_io_num = -1, // Not used
         .max_transfer_sz = 32
@@ -388,10 +554,10 @@ static esp_err_t spi_master_init(void) {
     };
 
     //Initialize the SPI bus
-    ESP_ERROR_CHECK(spi_bus_initialize(SPI_HOST, &buscfg, SPI_DMA_CH_AUTO));
+    ESP_ERROR_CHECK(spi_bus_initialize(SPI_HOST_CAN, &buscfg, SPI_DMA_CH_AUTO));
 
     //Attach the MCP2515 to the SPI bus
-    ESP_ERROR_CHECK(spi_bus_add_device(SPI_HOST, &devcfg, &mcp_spi_handle));
+    ESP_ERROR_CHECK(spi_bus_add_device(SPI_HOST_CAN, &devcfg, &mcp_spi_handle));
 
     ESP_LOGI(TAG, "SPI master initialized successfully.");
     return ESP_OK;
@@ -399,101 +565,6 @@ static esp_err_t spi_master_init(void) {
 
 
 /*--------------------------- Fading and PWM Logic ---------------------------*/
-void processCommand(const Command& cmd) {
-    ESP_LOGI(TAG, "Processing command for %s: %s%d, brightness=%d, fade=%dms",
-             (cmd.type == TargetType::OUTPUT) ? "output" : "group",
-             (cmd.type == TargetType::OUTPUT) ? "" : cmd.group_name.c_str(),
-             cmd.output_id,
-             cmd.brightness,
-             cmd.fade_ms);
-
-    if (cmd.type == TargetType::OUTPUT) {
-        setOutput(cmd.output_id, cmd.brightness, cmd.fade_ms);
-    } else if (cmd.type == TargetType::GROUP) {
-        cJSON* config = HSG::API::get_config_json_obj();
-        if (!config) {
-            ESP_LOGE(TAG, "Failed to get config to process group command.");
-            return;
-        }
-
-        // 2. Find the "groups" object and the specific group name
-        cJSON* groups = cJSON_GetObjectItem(config, "groups");
-        cJSON* group_outputs = cJSON_GetObjectItem(groups, cmd.group_name.c_str());
-
-        // 3. If the group is found, iterate through its outputs
-        if (cJSON_IsArray(group_outputs)) {
-            cJSON* output_item = NULL;
-            cJSON_ArrayForEach(output_item, group_outputs) {
-                if (cJSON_IsNumber(output_item)) {
-                    // For each output in the group, call setOutput()
-                    int output_id = output_item->valueint;
-                    setOutput(output_id, cmd.brightness, cmd.fade_ms);
-                }
-            }
-        } else {
-            ESP_LOGW(TAG, "Group '%s' not found in configuration.", cmd.group_name.c_str());
-        }
-
-        // 4. Clean up the cJSON object
-        cJSON_Delete(config);
-    }
-}
-
-
-void setOutput(int output, int brightness, int fadeMs) {
-    int outputIndex = output - 1;
-    if (outputIndex < 0 || outputIndex >= MAX_OUTPUTS) return;
-
-    // Set up the parameters for the animation engine
-    outputs[outputIndex].startPwmValue = outputs[outputIndex].currentPwmValue;
-    outputs[outputIndex].targetPwmValue = (int)roundf(brightness / 100.0f * 4095.0f);
-    outputs[outputIndex].fadeStartTime = esp_log_timestamp();
-    outputs[outputIndex].fadeDuration = (fadeMs > 0) ? fadeMs : 1; // Prevent division by zero
-
-    // Store the last "ON" brightness for stateful commands
-    if (brightness > 0) {
-        outputBrightness[outputIndex] = brightness;
-    }
-}
-
-void processFades() {
-    for (int i = 0; i < MAX_OUTPUTS; i++) {
-        // Check if a fade is active for this output
-        if (outputs[i].currentPwmValue != outputs[i].targetPwmValue) {
-            unsigned long elapsedTime = esp_log_timestamp() - outputs[i].fadeStartTime;
-            int newPwmValue;
-
-            if (elapsedTime >= outputs[i].fadeDuration) {
-                // Fade is complete, snap to the target value
-                newPwmValue = outputs[i].targetPwmValue;
-            } else {
-                // Fade is in progress, calculate the intermediate value (linear interpolation)
-                float progress = (float)elapsedTime / (float)outputs[i].fadeDuration;
-                newPwmValue = outputs[i].startPwmValue + (progress * (outputs[i].targetPwmValue - outputs[i].startPwmValue));
-            }
-
-            // Only update the physical PWM chip if the value has actually changed
-            if (newPwmValue != outputs[i].currentPwmValue) {
-                outputs[i].currentPwmValue = newPwmValue;
-                
-                uint8_t addr;
-                uint8_t channel;
-                // Get the physical address from our mapping component
-                if (hsg_outputs_get_mapping(i + 1, &addr, &channel)) {
-                    if (xSemaphoreTake(i2c_mutex, portMAX_DELAY)) {
-                        // Send the raw value to the hardware driver
-                        esp_err_t result = hsg_pca9685::pca9685_write_pwm_value(addr, channel, newPwmValue);
-                        xSemaphoreGive(i2c_mutex); // Release the lock
-
-                        if (result != ESP_OK) {
-                            ESP_LOGE(TAG, "Failed to write PWM value to PCA@0x%02X ch%d. Error: %s", addr, channel, esp_err_to_name(result));
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
 
 static void load_bindings() {
     g_bindings.clear();
@@ -536,8 +607,6 @@ static void load_bindings() {
 extern "C" void app_main(void) {
     ESP_LOGI(TAG, "Starting up...");
 
-    i2c_mutex = xSemaphoreCreateMutex();
-
     // 1. Initialize NVS (must be first)
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -548,8 +617,8 @@ extern "C" void app_main(void) {
 
     // 2. Initialize Networking
     s_net_event_group = xEventGroupCreate();
+  
     initialize_network_interfaces();
-    
     ESP_LOGI(TAG, "Waiting for network connection...");
     xEventGroupWaitBits(s_net_event_group, ETH_CONNECTED_BIT | WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
     ESP_LOGI(TAG, "Network connected.");
@@ -557,37 +626,25 @@ extern "C" void app_main(void) {
     // 3. Initialize the core API component and its services
     HSG::API::Init api_init;
     api_init.i2c_port = I2C_MASTER_NUM;
-    api_init.output_cb = [](int out, int brightness, int fade_ms){
-        Command cmd = {TargetType::OUTPUT, out, "", brightness, fade_ms};
+    api_init.output_cb = [](int out, int brightness, int fade_ms, const char* state_str){
+        Command cmd = {TargetType::OUTPUT, out, "", brightness, fade_ms, state_str ? state_str : ""};
         processCommand(cmd);
     };
-    api_init.group_cb = [](const char* name, int brightness, int fade_ms){
+    api_init.group_cb = [](const char* name, int brightness, int fade_ms, const char* state_str){
      //   int brightness = (strcmp(state, "ON") == 0) ? 100 : 0;
-        Command cmd = {TargetType::GROUP, 0, std::string(name), brightness, fade_ms};
+        Command cmd = {TargetType::GROUP, 0, std::string(name), brightness, fade_ms, state_str ? state_str : ""};
         processCommand(cmd);
     };
-    
-/*    api_init.config_updated_cb = [](){
-        ESP_LOGI(TAG, "Configuration updated, reloading outputs...");
-        cJSON* config = HSG::API::get_config_json_obj();
-        hsg_outputs_reload_config(config);
-        cJSON_Delete(config);
+    api_init.get_outputs_json_cb = [](){
+        return get_current_outputs_json();
     };
-*/
+
     HSG::API::start(api_init);
     HSG::API::mqtt_start();
 
-    /*
-    // 4. *** NEW: Wait for the API to confirm config is loaded ***
-    ESP_LOGI(TAG, "Waiting for HSG-API configuration to be loaded...");
-    xEventGroupWaitBits(HSG::API::get_event_group(), CONFIG_LOADED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
-    ESP_LOGI(TAG, "HSG-API configuration is ready.");
-*/
-    // 5. Initialize Hardware Drivers and Dependent Components
     ESP_ERROR_CHECK(i2c_master_init());
     ESP_LOGI(TAG, "I2C ready: SDA=%d SCL=%d @%dHz", I2C_MASTER_SDA_IO, I2C_MASTER_SCL_IO, I2C_MASTER_FREQ_HZ);
-    
-    // 6. Init Outputs by PASSING the config to it
+
     cJSON* initial_config = HSG::API::get_config_json_obj();
     ESP_ERROR_CHECK(hsg_outputs_init(I2C_MASTER_NUM, initial_config));
     hsg_outputs_clear_all();
@@ -613,27 +670,15 @@ void main_task(void *pvParameter)
         vTaskDelete(NULL);
     }
     
-    // 2. Create the MCP2515 object, passing the handle to the constructor
     MCP2515 mcp2515(&mcp_spi_handle);
-
-    // 3. Set the interrupt pin (since the constructor didn't)
-    //mcp2515.set_interrupt_pin((gpio_num_t)PIN_NUM_INT);
-
-    // 5. Set the configuration
     mcp2515.reset();
-//    mcp2515.setBitrate(CAN_500KBPS, MCP_8MHZ);
-//    mcp2515.setNormalMode()
-
     ESP_ERROR_CHECK(mcp2515.setBitrate(CAN_500KBPS, MCP_8MHZ));
     ESP_ERROR_CHECK(mcp2515.setNormalMode());
-    
- //   ESP_ERROR_CHECK(mcp2515_enable_rx_interrupts(mcp_spi_handle));
-
     ESP_LOGI(TAG, "MCP2515 initialized successfully.");
 
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_NEGEDGE;
-    io_conf.pin_bit_mask = (1ULL << PIN_NUM_INT);
+    io_conf.pin_bit_mask = (1ULL << PIN_NUM_INT_CAN);
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     gpio_config(&io_conf);
@@ -641,8 +686,8 @@ void main_task(void *pvParameter)
     gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
     g_last_mutex = xSemaphoreCreateMutex();
     gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
-   // gpio_isr_handler_add((gpio_num_t)PIN_NUM_INT, gpio_isr_handler, (void*) (uint32_t) PIN_NUM_INT);
-    ESP_ERROR_CHECK(gpio_isr_handler_add((gpio_num_t)PIN_NUM_INT, gpio_isr_handler, (void*)PIN_NUM_INT));
+   
+    ESP_ERROR_CHECK(gpio_isr_handler_add((gpio_num_t)PIN_NUM_INT_CAN, gpio_isr_handler, (void*)PIN_NUM_INT_CAN));
 
     load_bindings();
 

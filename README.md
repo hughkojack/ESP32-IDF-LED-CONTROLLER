@@ -97,10 +97,44 @@ ESP32-IDF-LED-CONTROLLER/
 ├── CMakeLists.txt # Build configuration
 └── sdkconfig # ESP-IDF project config
 
-markdown
-Copy code
-
 ### Notes
 - ⚡ The ESP32 will **prefer Ethernet** if connected, and fall back to **Wi-Fi** otherwise.  
 - 🚌 CAN bus is handled through MCP2515 over SPI with **interrupt-driven reception**.  
 - 💡 I²C is available for LED control (e.g., via PCA9685) but can be extended for other peripherals.  
+
+
+## Web Interface
+
+The firmware provides two web pages for interacting with the device, served on port 80.
+
+### Configuration Interface (`/`)
+
+The main interface, accessed by navigating to the device's IP address, is used for all device configuration. This includes:
+- I2C Device Mapping
+- Output Labels
+- Group Definitions
+- CAN Switch Bindings
+- Network & MQTT Settings
+- Advanced actions like OTA updates and restarts.
+
+### Real-Time Control Interface (`/control`)
+
+Introduction of control.html
+The control.html file provides a dedicated, user-friendly interface for real-time control of the lighting system, separate from the main configuration page. It is designed to be a simple, responsive "remote control" that can be used from a phone, tablet, or desktop.
+
+Key Features:
+1. Dynamic UI Generation: The page is built dynamically based on the Hub's current configuration. It fetches the groups, i2c mappings, and labels from the /api/config endpoint and creates an organized, collapsible accordion layout. Each section represents a group, and inside, it lists all the individual lights belonging to that group with their custom names.
+
+2. Real-Time, Bi-Directional Feedback: The page immediately establishes a WebSocket connection to the ESP32 Hub.
+
+ESP32 to Browser: Whenever a light's state changes—regardless of whether the command came from a physical CAN switch, an MQTT message, or the web UI itself—the Hub broadcasts a status update over the WebSocket. The JavaScript on the page receives this message and instantly updates the corresponding button and slider to reflect the true state of the physical light.
+
+Browser to ESP32: User interactions on the page (clicking a button or moving a slider) send commands to the /api/command endpoint to control the lights.
+
+3. Comprehensive Control: The interface provides control over both groups and individual lights:
+
+    Group Control: Each accordion section has a master "All" button to toggle the entire group on or off.
+
+    Individual Control: Inside each group, every light has its own power toggle icon, a descriptive label, and a "glowing track" slider for fine-grained brightness control (0-100%).
+
+This implementation creates a seamless and intuitive user experience, ensuring the web interface is always a perfect, real-time mirror of the lighting system's actual state.

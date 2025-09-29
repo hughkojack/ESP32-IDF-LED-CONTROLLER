@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Light Control</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #111827; /* Gray 900 */ }
+        .toggle-button { transition: background-color 0.2s; }
+        .toggle-button.on { background-color: #1206f4; /* Indigo 600 */ }
+        .accordion-header { cursor: pointer; }
+        .accordion-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; }
+        .accordion-content.open { max-height: 1000px; /* Large value to accommodate many items */ }
+        .icon { transition: transform 0.3s; display: inline-block; }
+        .open > .icon-container > .icon { transform: rotate(90deg); }
+        .spinner { border: 4px solid rgba(0,0,0,.1); border-left-color: #4f46e5; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @property --c { syntax: '<color>'; inherits: true; initial-value: #0000; }
+        .slider-container { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.5rem; }
+        .glow {
+            --c: rgb(0, 255, 255, calc(0.25 + var(--val) / 125));
+            --c: hsl(160deg 80% 50% / calc(0.25 + var(--val) / 125));
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background: transparent;
+            cursor: pointer;
+            width: 15rem;
+            position: relative;
+        }
+        .glow::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: calc((var(--val) - 1) * 1%);
+            min-width: 0.5em;
+            height: 100%;
+            background: var(--c);
+            box-shadow: 
+                0 0 0.2em 0 hsl(0 0% 0%) inset, 
+                -0.1em 0.1em 0.1em -0.1em hsl(0 0% 100% / 0.5),
+                0 0 calc(1em + 0.001em * var(--val)) calc(0.1em + 0.00025em * var(--val)) var(--c)
+                ;
+            border-radius: 1em 0 0 1em;
+            aopacity: calc(20% + var(--val) * 1%);
+        }
+        .glow::-webkit-slider-runnable-track {
+            box-shadow: 
+                0 0 0.2em 0 hsl(0 0% 0%) inset, 
+                -0.1em 0.1em 0.1em -0.1em hsl(0 0% 100% / 0.5);
+            background: 
+                linear-gradient(to bottom right, #0001, #0000),
+                #343133;
+            border-radius: 1em;
+            height: 1em;
+        }
+        .glow::-webkit-slider-thumb {
+            --d: var(--c);
+            --d: rgb(from var(--c) r g b / calc(0.35 * var(--val) * 1%));
+            -webkit-appearance: none; /* Override default look */
+            appearance: none;
+            background-color: #5cd5eb;
+            transform: translateY(calc(-50% + 0.5em));
+            width: 3em;
+            aspect-ratio: 1;
+            background: red;
+            border-radius: 50%;
+            background: 
+                radial-gradient(farthest-side, #0000 30%, var(--d) 0, #0000 calc(var(--val) * 0.75%)) 50% 50% / 100% 100% no-repeat,
+                radial-gradient(#0000  20%, #343133 16%, #545153 20%),
+                repeating-linear-gradient(#0000 0 10%, #0002 0 20%) 50% 50% / 25% 25% no-repeat,
+                repeating-linear-gradient(90deg, #0000 0 10%, #0002 0 20%) 50% 50% / 25% 25% no-repeat,
+                radial-gradient(var(--c) 20%, #0000 0),  /* middle hole size */
+                #545153;
+            box-shadow:
+                inset -0.15em -0.15em 0.2em #0008,
+                inset 0.15em 0.15em 0.2em #ffffff22,
+                inset calc(var(--val) * 1em / 500) 0em calc(var(--val) * 1em / 500) calc(var(--val) * -1em / 700) var(--c),
+                0.25em 0.25em 0.5em #0006,
+                calc(0.0125em * var(--val)) calc(0.005em * var(--val)) calc(0.02em * var(--val)) calc(-0.01em * var(--val)) #000a;
+            border-radius: 50%;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200 font-sans p-4">
+
+    <div class="container mx-auto max-w-4xl">
+        <header class="text-center mb-6">
+            <h1 class="text-3xl font-bold text-white">Light Control</h1>
+        </header>
+        <div id="loadingSpinner" class="flex justify-center items-center h-48">
+             <div class="w-8 h-8 spinner"></div>
+        </div>
+        <main id="controlContainer" class="hidden space-y-4"></main>
+    </div>
+
+    <script>
+        const controlContainer = document.getElementById('controlContainer');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+        const itemStates = {}; // e.g., { 'output_1': false, 'group_Kitchen': false }
+        let fullConfig = {}; 
+        
+        // --- DEBOUNCE HELPER for sliders ---
+        let debounceTimer;
+        function debounce(func, delay) {
+            return function(...args) {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => func.apply(this, args), delay);
+            };
+        }
+        
+        function recalcGroups() {
+            if (!fullConfig.groups) return;
+
+            for (const groupName in fullConfig.groups) {
+                const groupOutputs = fullConfig.groups[groupName] || [];
+                // Group is ON if ANY child output is ON
+                const isGroupOn = groupOutputs.some(outputId => itemStates[`output_${outputId}`]);
+                const groupKey = `group_${groupName}`;
+                itemStates[groupKey] = isGroupOn;
+
+                const groupButton = document.querySelector(
+                    `.toggle-button[data-id='${groupName}'][data-type='group']`
+                );
+                updateButtonStyle(groupButton, isGroupOn);
+            }
+        }
+
+        function updateButtonStyle(button, isOn) {
+            if (!button) return;
+            button.classList.toggle('on', isOn);
+            button.classList.toggle('bg-indigo-600', isOn);
+            const isGroup = button.classList.contains('group-toggle');
+            button.classList.toggle(isGroup ? 'bg-gray-700' : 'bg-gray-600', !isOn);
+        }
+
+        async function fetchConfigAndBuildUI() {
+            try {
+                const [configResponse, stateResponse] = await Promise.all([
+                    fetch('/api/config'),
+                    fetch('/api/state')
+                ]);
+                if (!configResponse.ok || !stateResponse.ok) throw new Error('Failed to fetch data');
+                const config = await configResponse.json();
+                fullConfig = config;
+                const initialState = await stateResponse.json();
+
+                controlContainer.innerHTML = ''; // Clear any previous content
+                
+                if (config.groups && Object.keys(config.groups).length > 0) {
+                    const labels = config.labels || {};
+                    for (const groupName in config.groups) {
+                        const groupKey = `group_${groupName}`;
+                        itemStates[groupKey] = false;
+
+                        const groupOutputs = config.groups[groupName] || [];
+                        let individualLightsHTML = '';
+                        
+                        groupOutputs.forEach(outputNum => {
+                            const outputKey = `output_${outputNum}`;
+                            itemStates[outputKey] = false;
+                            const label = labels[outputNum] || `Output ${outputNum}`;
+                            individualLightsHTML += `
+                                <div class="p-2 bg-gray-700 rounded-md">
+                                    <div class="flex items-center justify-between text-sm">
+                                        <span class="text-gray-400 italic">${label}</span>
+                                        <button class="toggle-button output-toggle bg-gray-600 p-2 rounded-md" data-id="${outputNum}" data-type="output">
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M5.636 5.636a9 9 0 1 0 12.728 0M12 3v9" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    <div class="slider-container">
+                                        <input type="range" min="0" max="100" value="0" style="--val: 0" class="glow" data-id="${outputNum}">
+                                        <span class="percent-display text-xs font-mono w-12 text-right" data-id="${outputNum}">0%</span>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        const accordionHTML = `
+                            <div class="bg-gray-800 rounded-lg shadow-lg">
+                                <div class="accordion-header flex items-center justify-between p-4">
+                                    <div class="flex items-center space-x-3 icon-container">
+                                        <span class="icon text-indigo-400 font-bold">&#9654;</span>
+                                        <h2 class="text-xl font-semibold text-white">${groupName}</h2>
+                                    </div>
+                                    <button class="toggle-button group-toggle bg-gray-700 py-2 px-4 rounded-md" data-id="${groupName}" data-type="group">All</button>
+                                </div>
+                                <div class="accordion-content">
+                                    <div class="px-4 pb-4 space-y-3 border-t border-gray-700 pt-4">
+                                        ${individualLightsHTML}
+                                    </div>
+                                </div>
+                            </div>`;
+                        controlContainer.insertAdjacentHTML('beforeend', accordionHTML);
+                    }
+                } else {
+                    controlContainer.innerHTML = '<p class="text-gray-400 text-center">No groups are defined. Please configure groups in the main interface.</p>';
+                }
+                
+                if (initialState.outputs) {
+                    for (const outputId in initialState.outputs) {                        
+                        const brightness = Math.round((initialState.outputs[outputId] / 4095) * 100);
+                        updateItemUI('output', outputId, brightness);
+                        /*
+                        const pwmValue = initialState.outputs[outputId];
+                        const brightness = Math.round((pwmValue / 4095) * 100);
+                        const isOn = initialState.outputs[outputId] > 0;
+
+                        const key = `output_${outputId}`;
+                        itemStates[key] = isOn;
+
+                        const button = document.querySelector(`.toggle-button[data-id='${outputId}'][data-type='output']`);
+                        updateButtonStyle(button, isOn);
+                        updateSliderUI(outputId, brightness); */
+                    }
+                }
+
+                recalcGroups();
+
+                addEventListeners();
+                loadingSpinner.classList.add('hidden');
+                controlContainer.classList.remove('hidden');
+
+            } catch (error) {
+                console.error('Error:', error);
+                controlContainer.innerHTML = '<p class="text-red-500 text-center">Error loading configuration.</p>';
+                loadingSpinner.classList.add('hidden');
+                controlContainer.classList.remove('hidden');
+            }
+        }
+        
+        function addEventListeners() {
+            document.querySelectorAll('.toggle-button').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    handleToggle(e.currentTarget);
+                });
+            });
+            document.querySelectorAll('.accordion-header').forEach(header => {
+                header.addEventListener('click', () => {
+                    const content = header.nextElementSibling;
+                    header.classList.toggle('open');
+                    content.classList.toggle('open');
+                });
+            });
+            document.querySelectorAll('.glow').forEach(slider => {
+                const percentDisplay = document.querySelector(`.percent-display[data-id='${slider.dataset.id}']`);
+                slider.addEventListener('input', () => { // Update visual instantly on drag
+                    const brightness = slider.value;
+                    slider.style.setProperty('--val', brightness);
+                    if (percentDisplay) percentDisplay.textContent = `${brightness}%`;
+                });
+                slider.addEventListener('change', () => handleSliderChange(slider)); // Send command on release
+            });
+        }
+
+        function updateItemAndChildren(kind, id, value) {
+            const isOn = !!value;
+
+            if (kind === "group") {
+                // Update ONLY the group button itself (no fan-out here)
+                const key = `group_${id}`;
+                itemStates[key] = isOn ? 100 : 0;
+
+                const groupBtn = document.querySelector(
+                `.toggle-button[data-type="group"][data-id="${id}"]`
+                );
+                if (groupBtn) updateButtonStyle(groupBtn, isOn);
+
+                // Children will be updated by backend WebSocket events.
+                return;
+            }
+
+            if (kind === "output") {
+                // Update the output button and recompute groups
+                const key = `output_${id}`;
+                itemStates[key] = isOn ? 100 : 0;
+
+                const outBtn = document.querySelector(
+                `.toggle-button[data-type="output"][data-id="${id}"]`
+                );
+                if (outBtn) updateButtonStyle(outBtn, isOn);
+
+                // Recompute group states based on member outputs
+                recalcGroups();
+                return;
+            }
+        }
+
+        // handleToggle now uses the new centralized function
+/*        async function handleToggle(button) {
+            const type = button.dataset.type;
+            const id = button.dataset.id;
+            try {
+                const command = { state: "TOGGLE", fade: 250 };
+                command[type] = (type === 'output') ? parseInt(id) : id;
+                await fetch('/api/command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(command)
+                });
+            } catch (error) {
+                console.error('Command failed:', error);
+            }
+        } */
+        
+        async function handleToggle(button) {
+            const type = button.dataset.type;
+            const id = button.dataset.id;
+            const key = `${type}_${id}`;
+/*
+            // 1. Determine the new state locally
+            const newState = !itemStates[key];
+            const newBrightness = newState ? 100 : 0;
+            
+            // 2. Update the UI immediately for instant feedback
+            itemStates[key] = newState;
+            updateButtonStyle(button, newState);
+
+            if (type === 'output') {
+                updateSliderUI(id, newBrightness);
+            } else if (type === 'group' && fullConfig.groups[id]) {
+                // If a group is toggled, update all its children
+                fullConfig.groups[id].forEach(outId => {
+                    const childKey = `output_${outId}`;
+                    itemStates[childKey] = newState;
+                    updateSliderUI(outId, newBrightness);
+                    const childButton = document.querySelector(`.toggle-button[data-id='${outId}'][data-type='output']`);
+                    updateButtonStyle(childButton, newState);
+                });
+            }
+*/
+            // 3. Send the command to the ESP32 with the specific new state
+            try {
+                // We now send brightness instead of the "TOGGLE" state
+                const command = { state: "TOGGLE", fade: 250 };
+//                const command = { brightness: newBrightness, fade: 250 };
+                command[type] = (type === 'output') ? parseInt(id) : id;
+                
+                await fetch('/api/command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(command)
+                });
+            } catch (error) {
+                console.error('Command failed:', error);
+                // If the command fails, revert the UI back to the old state
+//                itemStates[key] = !newState;
+//                updateButtonStyle(button, !newState);
+                // ... (add logic to revert sliders and children if needed)
+            }
+        }
+
+        function updateItemUI(type, id, brightness) {
+            const key = `output_${id}`;
+            const isOn = brightness > 0;
+            itemStates[key] = isOn;
+            const button = document.querySelector(`.toggle-button[data-id='${id}'][data-type='output']`);
+            updateButtonStyle(button, isOn);
+            updateSliderUI(id, brightness);
+            recalcGroups();
+        }
+
+        function updateSliderUI(outputId, brightness) {
+            const slider = document.querySelector(`.glow[data-id='${outputId}']`);
+            const percent = document.querySelector(`.percent-display[data-id='${outputId}']`);
+            if (slider) {
+                slider.value = brightness;
+                slider.style.setProperty('--val', brightness); // Set the CSS variable
+            }
+            if (percent) percent.textContent = `${brightness}%`;
+        }
+
+        const handleSliderChange = debounce(async (slider) => {
+            const outputId = slider.dataset.id;
+            const brightness = parseInt(slider.value);
+            
+            try {
+                const command = { output: parseInt(outputId), brightness: brightness, fade: 200 };
+                await fetch('/api/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(command) });
+            } catch (error) {
+                console.error('Slider command failed:', error);
+            }
+        }, 150); // Debounce by 150ms
+
+        // onmessage now also uses the new centralized function
+        function connectWebSocket() {
+            const ws_url = `ws://${window.location.host}/ws`;
+            const ws = new WebSocket(ws_url);
+
+            ws.onopen = () => console.log("WebSocket connection established.");
+            ws.onmessage = (event) => {
+                let msg;
+                try { msg = JSON.parse(event.data); } catch { return; }
+                const isOn = (msg.state === "ON") || (Number(msg.brightness) > 0);
+                if (msg.output !== undefined) {
+                    updateItemAndChildren('output', msg.output, isOn);
+                    updateSliderUI(msg.output, msg.brightness); 
+                }
+                if (msg.group !== undefined) {
+                    updateItemAndChildren('group', msg.group, isOn);
+                    if(fullConfig.groups[msg.group]) {
+                        fullConfig.groups[msg.group].forEach(outId => updateSliderUI(outId, msg.brightness));
+                    }
+                }
+            };    
+            ws.onclose = () => {
+                console.log("WebSocket connection closed. Reconnecting in 3 seconds...");
+                setTimeout(connectWebSocket, 3000);
+            };
+            ws.onerror = (error) => {
+                console.error("WebSocket error:", error);
+                ws.close();
+            };
+        }
+        
+        window.onload = () => {
+            fetchConfigAndBuildUI();
+            connectWebSocket();
+        };
+    </script>
+</body>
+</html>

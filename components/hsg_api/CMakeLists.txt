@@ -15,3 +15,4 @@ idf_component_register(
 # Embed your HTML file as binary
 target_add_binary_data(${COMPONENT_TARGET} "ESP32-POE.html" TEXT)
 target_add_binary_data(${COMPONENT_TARGET} favicon.ico BINARY)
+target_add_binary_data(${COMPONENT_TARGET} "control.html" TEXT)

@@ -1,4 +1,7 @@
 
+option(BOARD_OLIMEX_POE "Build for Olimex ESP32-POE board" ON)
+option(BOARD_RACK32 "Build for Rack32 board with W5500" OFF)
+
 idf_component_register(
     SRCS
         "main.cpp"
@@ -19,3 +22,9 @@ idf_component_register(
         freertos
         esp_event
 )
+
+if(BOARD_OLIMEX_POE)
+    target_compile_definitions(${COMPONENT_TARGET} PRIVATE "BOARD_OLIMEX_POE")
+elseif(BOARD_RACK32)
+    target_compile_definitions(${COMPONENT_TARGET} PRIVATE "BOARD_RACK32")
+endif()

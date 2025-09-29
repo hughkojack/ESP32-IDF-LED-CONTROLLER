@@ -5,6 +5,7 @@
 #include "esp_http_server.h"
 #include "cJSON.h"
 #include "freertos/event_groups.h"
+#include "mqtt_client.h"
 
 // Minimal CAN frame (compatible with your MCP2515 struct)
 struct HSG_CanFrame {
@@ -26,13 +27,14 @@ struct Init {
     uint32_t i2c_scan_end   = 0x7F;   // last 7-bit addr to scan
 
     // output_cb(out, brightness[0..100], fade_ms)
-    std::function<void(int out, int brightness, int fade_ms)> output_cb;
+    std::function<void(int out, int brightness, int fade_ms, const char* state)> output_cb;
 
     // group_cb(name, state["ON"/"OFF"], fade_ms)
-    std::function<void(const char* name, int brightness, int fade_ms)> group_cb;
+    std::function<void(const char* name, int brightness, int fade_ms, const char* state)> group_cb;
 
     // NEW: Callback to notify main that config has been updated
     std::function<void()> config_updated_cb;
+    std::function<cJSON*()> get_outputs_json_cb;
 };
 
 esp_err_t register_uris(httpd_handle_t server, const Init& init);
@@ -65,6 +67,8 @@ std::string get_mqtt_json();
 // Scans I2C bus for PCA9685 devices, adds defaults to config if missing,
 // and removes any PCA9685 entries from config that are no longer present on bus.
 esp_err_t scan_and_prune_i2c(int i2c_port);
+esp_mqtt_client_handle_t get_mqtt_client();
+void send_ws_message(const std::string& msg);
 
 } // namespace API
 } // namespace HSG

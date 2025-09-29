@@ -12,12 +12,14 @@
 #include "esp_http_server.h"
 #include "esp_ota_ops.h"
 #include "esp_mac.h"
+#include "esp_event.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "driver/i2c_master.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "lwip/opt.h"
 
 static const char* TAG = "HSG-API";
 static const char* NVS_NS = "cfg";
@@ -29,6 +31,9 @@ extern const char _binary_ESP32_POE_html_end[]   asm("_binary_ESP32_POE_html_end
 extern const uint8_t _binary_favicon_ico_start[] asm("_binary_favicon_ico_start");
 extern const uint8_t _binary_favicon_ico_end[]   asm("_binary_favicon_ico_end");
 
+extern const char _binary_control_html_start[] asm("_binary_control_html_start");
+extern const char _binary_control_html_end[]   asm("_binary_control_html_end");
+
 extern i2c_master_bus_handle_t i2c_bus_handle;
 
 namespace {
@@ -39,6 +44,8 @@ HSG_CanFrame g_last{};
 SemaphoreHandle_t g_last_mutex = nullptr;
 esp_mqtt_client_handle_t g_mqtt_client = nullptr;
 static std::string g_mqtt_command_topic;
+int g_ws_fd = -1; 
+//static esp_err_t h_websocket(httpd_req_t *req);
 
 // ------------------ small helpers ------------------
 static esp_err_t send_json(httpd_req_t *req, cJSON *root) {
@@ -107,36 +114,6 @@ static esp_err_t i2c_probe(i2c_master_bus_handle_t bus, uint8_t addr7) {
     return ret;
 }
 
-/*
-// I2C probe (7-bit)
-static esp_err_t i2c_probe(i2c_port_t port, uint8_t addr7) {
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (addr7 << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_stop(cmd);
-    esp_err_t ret = i2c_master_cmd_begin(port, cmd, pdMS_TO_TICKS(20));
-    i2c_cmd_link_delete(cmd);
-    return ret;
-}
-
-static esp_err_t i2c_probe(uint8_t addr) {
-    esp_err_t ret = ESP_FAIL; 
-    i2c_master_dev_handle_t dev_handle;
-    i2c_device_config_t dev_cfg = {};
-    dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
-    dev_cfg.device_address = addr;
-    dev_cfg.scl_speed_hz = 100000; // Probe at a safe 100KHz
-    if (xSemaphoreTake(i2c_mutex, pdMS_TO_TICKS(100))) { // Wait up to 100ms
-        ret = i2c_master_bus_add_device(i2c_bus_handle, &dev_cfg, &dev_handle);
-        xSemaphoreGive(i2c_mutex); // Release the lock
-    }
-    if (ret == ESP_OK) {
-        i2c_master_bus_rm_device(dev_handle); // Clean up immediately after successful probe
-    }
-    return ret;
-}
-*/
-
 static std::vector<uint8_t> scan_pca9685_addrs(i2c_port_t port) {
     std::vector<uint8_t> found;
     for (uint8_t addr = 0x40; addr <= 0x47; ++addr) {
@@ -164,6 +141,14 @@ static esp_err_t h_root(httpd_req_t* req) {
     httpd_resp_send(req, _binary_ESP32_POE_html_start, len);
     return ESP_OK;
 }
+
+static esp_err_t h_control_page(httpd_req_t* req) {
+    size_t len = _binary_control_html_end - _binary_control_html_start;
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, _binary_control_html_start, len);
+    return ESP_OK;
+}
+
 
 // GET /api/adopt
 static esp_err_t h_adopt(httpd_req_t* req) {
@@ -269,7 +254,6 @@ static esp_err_t h_bindings_post(httpd_req_t* req) {
     return httpd_resp_sendstr(req, "OK");
 }
 
-
 // GET /api/config  (returns ONLY the "config" object)
 static esp_err_t h_config_get(httpd_req_t* req) {
     cJSON* root = load_cfg_json();
@@ -372,34 +356,19 @@ static esp_err_t h_command(httpd_req_t* req) {
     int fade = 0;
     if (auto* v = cJSON_GetObjectItem(cmd, "fade"); cJSON_IsNumber(v)) fade = v->valueint;
 
+    const cJSON *state_json = cJSON_GetObjectItem(cmd, "state");
+    const char* state_str = cJSON_IsString(state_json) ? state_json->valuestring : nullptr;
+    
+    int brightness = 0; // Default to 0
+    const cJSON *brightness_json = cJSON_GetObjectItem(cmd, "brightness");
+    if (cJSON_IsNumber(brightness_json)) {
+        brightness = brightness_json->valueint;
+    }
+    
     if (auto* out = cJSON_GetObjectItem(cmd, "output"); cJSON_IsNumber(out)) {
-        int brightness = 0;
-        if (auto* b = cJSON_GetObjectItem(cmd, "brightness"); cJSON_IsNumber(b)) brightness = b->valueint;
-        if (auto* s = cJSON_GetObjectItem(cmd, "state"); cJSON_IsString(s)) {
-            std::string st = s->valuestring; for (auto& ch: st) ch = (char)toupper(ch);
-            brightness = (st == "ON") ? 100 : 0;
-        }
-        if (g_init.output_cb) g_init.output_cb(out->valueint, brightness, fade);
+        if (g_init.output_cb) g_init.output_cb(out->valueint, brightness, fade, state_str);
     } else if (auto* grp = cJSON_GetObjectItem(cmd, "group"); cJSON_IsString(grp)) {
-        int brightness = 100; // Default to ON
-        int fade_ms = 0;
-        
-        const cJSON* brightness_json = cJSON_GetObjectItem(cmd, "brightness");
-        const cJSON* state_json = cJSON_GetObjectItem(cmd, "state");
-        const cJSON* fade_json = cJSON_GetObjectItem(cmd, "fade");
-
-        if (cJSON_IsNumber(brightness_json)) {
-            brightness = brightness_json->valueint;
-        } else if (cJSON_IsString(state_json) && strcmp(state_json->valuestring, "OFF") == 0) {
-            brightness = 0;
-        }
-
-        if (cJSON_IsNumber(fade_json)) {
-            fade_ms = fade_json->valueint;
-        }
-        
-//        if (auto* s = cJSON_GetObjectItem(cmd, "state"); cJSON_IsString(s)) state = s->valuestring;
-        if (g_init.group_cb) g_init.group_cb(grp->valuestring, brightness, fade_ms);
+        if (g_init.group_cb) g_init.group_cb(grp->valuestring, brightness, fade, state_str);
     }
 
     cJSON_Delete(cmd);
@@ -453,10 +422,58 @@ EventGroupHandle_t g_event_group = nullptr;
 
 } // namespace (anon)
 
+// This is the main handler for the WebSocket endpoint
+static esp_err_t h_websocket(httpd_req_t *req) {
+    // When a new client connects, store its file descriptor
+    if (req->method == HTTP_GET) {
+        ESP_LOGI(TAG, "New WebSocket client connected, fd=%d", httpd_req_to_sockfd(req));
+        // Store the socket file descriptor for sending messages
+        g_ws_fd = httpd_req_to_sockfd(req);
+        return ESP_OK;
+    }
+
+    // --- The rest of the function handles receiving messages ---
+    httpd_ws_frame_t ws_pkt;
+    memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
+    ws_pkt.type = HTTPD_WS_TYPE_TEXT;
+    
+    esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 128);
+    if (ret != ESP_OK) {
+        // This error (ESP_FAIL) is normal when a client disconnects
+        if (ret == ESP_FAIL) {
+            ESP_LOGW(TAG, "WebSocket client disconnected, fd=%d", httpd_req_to_sockfd(req));
+            // Invalidate the file descriptor
+            g_ws_fd = -1;
+        } else {
+            ESP_LOGE(TAG, "httpd_ws_recv_frame failed with %d", ret);
+        }
+        return ret;
+    }
+    
+    // We don't expect messages from the client in this app, but if we did,
+    // the logic would go here.
+    
+    return ESP_OK;
+}
+
+static esp_err_t h_state_get(httpd_req_t* req) {
+    if (g_init.get_outputs_json_cb) {
+        cJSON* root = cJSON_CreateObject();
+        cJSON* outputs_json = g_init.get_outputs_json_cb(); // Call the function in main.cpp
+        cJSON_AddItemToObject(root, "outputs", outputs_json);
+        return send_json(req, root);
+    }
+    return httpd_resp_send_500(req); // Or send an empty object
+}
+
+
 // ------------------ Public API ------------------
 namespace HSG {
 namespace API {
 
+esp_mqtt_client_handle_t get_mqtt_client() {
+    return g_mqtt_client; 
+}
 
 cJSON* get_config_json_obj() {
     cJSON* root = load_cfg_json();   // already implemented in your file
@@ -481,6 +498,7 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
         return ESP_ERR_INVALID_ARG;
     }
     g_init = init;
+    g_http = server; // Store the server handle for async sends
 
     // Root
     httpd_uri_t root = { .uri="/", .method=HTTP_GET, .handler=h_root, .user_ctx=nullptr };
@@ -498,7 +516,11 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     httpd_uri_t favicon_get = { .uri="/favicon.ico", .method=HTTP_GET, .handler=h_favicon,    .user_ctx=nullptr };
     httpd_uri_t bindings_get = { .uri="/api/bindings", .method=HTTP_GET, .handler=h_bindings_get, .user_ctx=nullptr };
     httpd_uri_t bindings_post = { .uri="/api/bindings", .method=HTTP_POST, .handler=h_bindings_post, .user_ctx=nullptr };
+    httpd_uri_t control_page = { .uri="/control", .method=HTTP_GET, .handler=h_control_page, .user_ctx=nullptr };
+    httpd_uri_t state_get = { .uri="/api/state", .method=HTTP_GET, .handler=h_state_get, .user_ctx=nullptr };
 
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &state_get));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &control_page));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &favicon_get));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &adopt_get));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &config_get));
@@ -510,6 +532,15 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &ota_post));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &bindings_get));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &bindings_post));
+
+    httpd_uri_t ws = {
+        .uri        = "/ws",
+        .method     = HTTP_GET,
+        .handler    = h_websocket,
+        .user_ctx   = NULL,
+        .is_websocket = true
+    };
+    httpd_register_uri_handler(server, &ws);
 
     ESP_LOGI(TAG, "API URIs registered");
     return ESP_OK;
@@ -588,6 +619,7 @@ esp_err_t start(const Init& cfg) {
     conf.max_uri_handlers = 16;   // more routes
     conf.lru_purge_enable = true;
     conf.server_port = 80;
+//    conf.max_open_sockets = 10; // Or another number higher than the default
 
     httpd_handle_t server = nullptr;
     auto err = httpd_start(&server, &conf);
@@ -599,9 +631,12 @@ esp_err_t start(const Init& cfg) {
 
     ESP_ERROR_CHECK(register_uris(server, cfg));
     ESP_LOGI(TAG, "HTTP API ready on :%d", conf.server_port);
+ 
+    ESP_LOGI(TAG, "HTTPD max_open_sockets = %d", conf.max_open_sockets);
+    ESP_LOGI("LWIP", "MAX_SOCKETS: %d", MEMP_NUM_NETCONN);
+    ESP_LOGI("LWIP", "TCP sockets: %d", MEMP_NUM_TCP_PCB);
+    ESP_LOGI("LWIP", "TCPIP thread stack: %d", TCPIP_THREAD_STACKSIZE);
 
-    // NOTE: I2C scan is NOT done here anymore. Call scan_and_prune_i2c()
-    //       from app_main() AFTER i2c_master_init().
     return ESP_OK;
 }
 
@@ -711,16 +746,17 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
                     int fade_ms = 0;
 
                     const cJSON *brightness_json = cJSON_GetObjectItem(json, "brightness");
-                    const cJSON *state_json = cJSON_GetObjectItem(json, "state");
                     const cJSON *fade_json = cJSON_GetObjectItem(json, "fade");
+                    const cJSON *state_json = cJSON_GetObjectItem(json, "state");
+                    const char* state_str = cJSON_IsString(state_json) ? state_json->valuestring : nullptr;
 
                     if (cJSON_IsNumber(brightness_json)) brightness = brightness_json->valueint;
-                    else if (cJSON_IsString(state_json) && strcmp(state_json->valuestring, "ON") == 0) brightness = 100;
+                    //else if (cJSON_IsString(state_json) && strcmp(state_json->valuestring, "ON") == 0) brightness = 100;
                     
                     if (cJSON_IsNumber(fade_json)) fade_ms = fade_json->valueint;
                     
                     if (g_init.output_cb) {
-                        g_init.output_cb(output_num, brightness, fade_ms);
+                        g_init.output_cb(output_num, brightness, fade_ms, state_str);
                     }
                 } 
                 // --- FIX: Add this block to handle GROUP commands ---
@@ -729,13 +765,14 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
                     int fade_ms = 0;
 
                     const cJSON *brightness_json = cJSON_GetObjectItem(json, "brightness");
-                    const cJSON *state_json = cJSON_GetObjectItem(json, "state");
                     const cJSON *fade_json = cJSON_GetObjectItem(json, "fade");
+                    const cJSON *state_json = cJSON_GetObjectItem(json, "state");
+                    const char* state_str = cJSON_IsString(state_json) ? state_json->valuestring : nullptr;
 
                     if (cJSON_IsNumber(brightness_json)) {
                         brightness = brightness_json->valueint;
-                    } else if (cJSON_IsString(state_json) && strcmp(state_json->valuestring, "OFF") == 0) {
-                        brightness = 0;
+//                    } else if (cJSON_IsString(state_json) && strcmp(state_json->valuestring, "OFF") == 0) {
+//                        brightness = 0;
                     }
 
                     if (cJSON_IsNumber(fade_json)) {
@@ -743,7 +780,7 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
                     }
 
                     if (g_init.group_cb) {
-                        g_init.group_cb(group_json->valuestring, brightness, fade_ms);
+                        g_init.group_cb(group_json->valuestring, brightness, fade_ms, state_str);
                     }
                 }
                 // --- END FIX ---
@@ -827,6 +864,20 @@ void mqtt_stop() {
         g_mqtt_client = nullptr;
     }
 }
+
+void send_ws_message(const std::string& msg) {
+    if (g_ws_fd >= 0) {
+        httpd_ws_frame_t ws_pkt;
+        memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
+        ws_pkt.payload = (uint8_t*)msg.c_str();
+        ws_pkt.len = msg.length();
+        ws_pkt.type = HTTPD_WS_TYPE_TEXT;
+        
+        // httpd_ws_send_frame_async is safe to call from any task
+        httpd_ws_send_frame_async(g_http, g_ws_fd, &ws_pkt);
+    }
+}
+
 
 } // namespace API
 } // namespace HSG

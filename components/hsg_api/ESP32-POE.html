@@ -92,7 +92,7 @@
                 <div id="groupContainer" class="space-y-4"></div>
                 <button id="addGroupBtn" class="mt-4 text-sm bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md transition duration-300">Add Group</button>
             </div>
-
+            
             <div id="bindingsSection" class="config-section hidden bg-gray-800 p-6 rounded-lg shadow-lg">
                 <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">CAN Switch Bindings</h2>
                 <p class="text-sm text-gray-400 mb-6">Map a specific CAN switch button press to an action on an output or group.</p>
@@ -383,22 +383,31 @@
             sysHeap.textContent = data.system?.heapFreeBytes || '-';
             sysSketch.textContent = data.system?.sketchSpaceUsedBytes || '-';
 
+            const labels = data.config.labels || {};
+
             i2cMapping.innerHTML = '';
             if (data.i2c && Array.isArray(data.i2c.pca9685) && data.i2c.pca9685.length > 0) {
-//            if (data.i2c?.pca9685?.length > 0) {
                 data.i2c.pca9685.forEach(addr => {
                     const hexAddr = `0x${addr.toString(16)}`;
                     const deviceContainer = document.createElement('div');
                     deviceContainer.innerHTML = `<h3 class="font-bold text-indigo-400 mb-2">PCA9685 at ${hexAddr}</h3>`;
                     const grid = document.createElement('div');
-                    grid.className = 'grid grid-cols-4 md:grid-cols-8 gap-2';
+                    grid.className = 'grid grid-cols-4 md:grid-cols-8 gap-x-3 gap-y-3';
                     for (let i = 0; i < 16; i++) {
-                        grid.innerHTML += `
-                            <div class="flex items-center">
-                                <label for="pca-${addr}-${i}" class="text-xs mr-2">${i}:</label>
-                                <input type="number" id="pca-${addr}-${i}" data-addr="${addr}" data-port="${i}" 
-                                       class="w-full bg-gray-700 text-white rounded-md px-2 py-1 text-xs border border-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-500">
-                            </div>`;
+                        const outputNum = data.config?.i2c?.pca9685?.[hexAddr]?.[i] || 0;
+                        const labelText = (outputNum > 0 && labels[outputNum]) ? labels[outputNum] : '';
+
+                        // MODIFIED: Create a container for each channel with both inputs side-by-side
+                        const inputContainer = document.createElement('div');
+                        inputContainer.className = 'flex flex-col space-y-1'; // Use flex-col for vertical stacking
+                        inputContainer.innerHTML = `
+                            <label for="pca-${addr}-${i}" class="text-xs text-center font-mono">Ch.${i}</label>
+                            <input type="number" id="pca-${addr}-${i}" data-addr="${addr}" data-port="${i}" value="${outputNum}" title="Logical Output Number"
+                                class="w-full text-center bg-gray-700 text-white rounded-md px-1 py-1 text-xs border border-gray-600">
+                            <input type="text" data-output-id="${outputNum}" value="${labelText}" placeholder="Label" title="Custom Label"
+                                class="i2c-label-input w-full text-center bg-gray-700 text-white rounded-md px-1 py-1 text-xs border border-gray-600">
+                        `;
+                        grid.appendChild(inputContainer);
                     }
                     deviceContainer.appendChild(grid);
                     i2cMapping.appendChild(deviceContainer);
@@ -574,7 +583,8 @@
                     password: mqttPassword.value
                 },
                 i2c: getI2cMappingFromUi(),
-                groups: getGroupsFromUi()
+                groups: getGroupsFromUi(),
+                labels: getLabelsFromUi()
             };
 
             setLoadingState(clickedButton, textEl, spinnerEl, true);
@@ -623,6 +633,18 @@
                 if (name && outputs.length > 0) groups[name] = outputs;
             });
             return groups;
+        }
+
+        function getLabelsFromUi() {
+            const labels = {};
+            document.querySelectorAll('.i2c-label-input').forEach(input => {
+                const outputId = input.dataset.outputId;
+                const labelText = input.value.trim();
+                if (outputId > 0 && labelText) {
+                    labels[outputId] = labelText;
+                }
+            });
+            return labels;
         }
 
         async function sendCommand() {
