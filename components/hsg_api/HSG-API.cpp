@@ -620,7 +620,8 @@ esp_err_t start(const Init& cfg) {
     conf.lru_purge_enable = true;
     conf.server_port = 80;
 //    conf.max_open_sockets = 10; // Or another number higher than the default
-
+    conf.stack_size = 8192;
+    
     httpd_handle_t server = nullptr;
     auto err = httpd_start(&server, &conf);
     if (err != ESP_OK) {

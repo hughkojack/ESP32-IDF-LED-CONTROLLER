@@ -680,18 +680,18 @@
             const file = otaFile.files[0];
             if (!file) return showStatus('Please select a firmware (.bin) file.', 'error');
             setLoadingState(uploadFwBtn, uploadBtnText, uploadSpinner, true);
-            showStatus(`Uploading ${file.name}...`, 'loading');
+            showStatus(`Uploading ${file.name}...This will take a moment.`, 'loading');
             try {
                 const response = await fetch(`/api/ota`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/octet-stream' },
                     body: file
                 });
-                if (!response.ok) throw new Error(`HTTP error!`);
+                if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
                 showStatus('Upload successful! Device will reboot.', 'success');
             } catch (error) {
                 console.error('Upload error:', error);
-                showStatus('Firmware upload failed.', 'error');
+                showStatus('Firmware upload failed. Check console for details.', 'error');
             } finally {
                 setLoadingState(uploadFwBtn, uploadBtnText, uploadSpinner, false);
             }
