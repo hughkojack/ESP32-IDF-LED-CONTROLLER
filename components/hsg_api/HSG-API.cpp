@@ -136,16 +136,16 @@ static esp_err_t h_favicon(httpd_req_t* req)
 
 // GET /
 static esp_err_t h_root(httpd_req_t* req) {
-    size_t len = _binary_ESP32_POE_html_end - _binary_ESP32_POE_html_start;
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, _binary_ESP32_POE_html_start, len);
-    return ESP_OK;
-}
-
-static esp_err_t h_control_page(httpd_req_t* req) {
     size_t len = _binary_control_html_end - _binary_control_html_start;
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, _binary_control_html_start, len);
+    return ESP_OK;
+}
+
+static esp_err_t h_config_page(httpd_req_t* req) {
+    size_t len = _binary_ESP32_POE_html_end - _binary_ESP32_POE_html_start;
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, _binary_ESP32_POE_html_start, len);
     return ESP_OK;
 }
 
@@ -516,11 +516,11 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     httpd_uri_t favicon_get = { .uri="/favicon.ico", .method=HTTP_GET, .handler=h_favicon,    .user_ctx=nullptr };
     httpd_uri_t bindings_get = { .uri="/api/bindings", .method=HTTP_GET, .handler=h_bindings_get, .user_ctx=nullptr };
     httpd_uri_t bindings_post = { .uri="/api/bindings", .method=HTTP_POST, .handler=h_bindings_post, .user_ctx=nullptr };
-    httpd_uri_t control_page = { .uri="/control", .method=HTTP_GET, .handler=h_control_page, .user_ctx=nullptr };
+    httpd_uri_t config_page = { .uri="/config", .method=HTTP_GET, .handler=h_config_page, .user_ctx=nullptr };
     httpd_uri_t state_get = { .uri="/api/state", .method=HTTP_GET, .handler=h_state_get, .user_ctx=nullptr };
 
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &state_get));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &control_page));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &config_page));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &favicon_get));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &adopt_get));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &config_get));
