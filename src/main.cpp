@@ -32,55 +32,24 @@ extern "C" {
 #include "esp_eth.h"
 #include "esp_eth_mac.h"
 #include "esp_eth_phy.h"
-#include "esp_eth_driver.h"
+//#include "esp_eth_driver.h"
+
+#include "hardware_config.h"
+#if defined(BOARD_RACK32)
+    #include "esp_mac.h"
+#endif
 
 #include "can_protocol.h"
 #include "HSG-API.h"
 #include "hsg_outputs.h"
 #include "hsg_pca9685.h"
+//#include "sdkconfig.h"
 
 static const char *TAG = "MAIN";
 
 /*--------------------------- Constants ----------------------------------*/
 #define MAX_OUTPUTS 160
 #define DEFAULT_FADE_MS 1000
-
-// --- Olimex ESP32-POE wiring ---
-#if defined(BOARD_OLIMEX_POE)
-    #define ETH_PHY_PWR_GPIO 12
-    #define I2C_MASTER_SCL_IO 16
-    #define I2C_MASTER_SDA_IO 13
-    #define PIN_NUM_CS        5 // For CAN
-    #pragma message "Compiling for Olimex ESP32-POE"
-#elif defined(BOARD_RACK32)
-    // --- Rack32 GPIOs ---
-    #define W5500_HOST        SPI2_HOST
-    #define W5500_MOSI_GPIO   23
-    #define W5500_MISO_GPIO   19
-    #define W5500_SCLK_GPIO   18
-    #define W5500_CS_GPIO     5
-    #define W5500_INT_GPIO    4
-    #define I2C_MASTER_SCL_IO 22
-    #define I2C_MASTER_SDA_IO 21
-    #define PIN_NUM_CS        25 // For CAN
-    #pragma message "Compiling for Rack32"
-#else
-    #error "No board defined. Please define BOARD_OLIMEX_POE or BOARD_RACK32 in CMakeLists.txt" 
-#endif
-
-// --- Common Pin Definitions ---
-
-#define ETH_MDC_GPIO      23
-#define ETH_MDIO_GPIO     18
-#define ETH_PHY_ADDR      0
-#define I2C_MASTER_NUM    I2C_NUM_0
-#define I2C_MASTER_FREQ_HZ 400000
-#define SPI_HOST_CAN      SPI2_HOST // Explicitly name for clarity
-#define PIN_NUM_MISO_CAN  33
-#define PIN_NUM_MOSI_CAN  32
-#define PIN_NUM_CLK_CAN   4
-#define PIN_NUM_INT_CAN   35
-#define ETH_RST_GPIO     -1
 
 // --- Global State for Network Failover ---
 static EventGroupHandle_t s_net_event_group;
@@ -91,8 +60,10 @@ static bool s_wifi_connected = false;
 static esp_netif_t *s_eth_netif = NULL;
 static esp_netif_t *s_wifi_netif = NULL;
 i2c_master_bus_handle_t i2c_bus_handle;
-static spi_device_handle_t mcp_spi_handle;
+static spi_device_handle_t can_spi_handle;
+static MCP2515* mcp2515_ptr = nullptr;
 static QueueHandle_t gpio_evt_queue = nullptr;
+
 
 // --- Application Structs & Data ---
 enum class TargetType { OUTPUT, GROUP };
@@ -142,6 +113,8 @@ void animation_task(void *pvParameter);
 static void IRAM_ATTR gpio_isr_handler(void* arg);
 static void wifi_start(void);
 void setOutput(int output, int brightness, int fadeMs);
+static void w5500_hardware_reset();
+void set_esp32_mac_on_w5500(esp_eth_handle_t eth_handle);
 
 // --- Core Logic ---
 void setOutput(int output, int brightness, int fadeMs) {
@@ -359,7 +332,6 @@ static void net_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-
 #if defined(BOARD_OLIMEX_POE)
 static void eth_start(void)
 {
@@ -380,15 +352,17 @@ static void eth_start(void)
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
     phy_config.phy_addr = ETH_PHY_ADDR;
     phy_config.reset_gpio_num = ETH_RST_GPIO;
-
+    
     // Power on the PHY
     gpio_set_direction((gpio_num_t)ETH_PHY_PWR_GPIO, GPIO_MODE_OUTPUT);
     gpio_set_level((gpio_num_t)ETH_PHY_PWR_GPIO, 1);
     vTaskDelay(pdMS_TO_TICKS(10));
-
-    // Install Ethernet driver
+    
+    // New MAC creation API (no more esp32_emac_config struct)
     esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&esp32_emac_config, &mac_config);
     esp_eth_phy_t *phy = esp_eth_phy_new_lan87xx(&phy_config);
+      
+    // Install Ethernet driver
     esp_eth_config_t config = ETH_DEFAULT_CONFIG(mac, phy);
     esp_eth_handle_t eth_handle = NULL;
     ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
@@ -398,22 +372,107 @@ static void eth_start(void)
 }
 #elif defined(BOARD_RACK32)
 static void eth_start(void) {
-    spi_bus_config_t buscfg = { .mosi_io_num = W5500_MOSI_GPIO, .miso_io_num = W5500_MISO_GPIO, .sclk_io_num = W5500_SCLK_GPIO, .quadwp_io_num = -1, .quadhd_io_num = -1 };
+    ESP_LOGI(TAG, "Initializing W5500 with hardware reset...");
+    vTaskDelay(pdMS_TO_TICKS(100));
+    w5500_hardware_reset();
+
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << (gpio_num_t)W5500_INT_GPIO),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_NEGEDGE
+    };
+    gpio_config(&io_conf);
+
+    spi_bus_config_t buscfg = {
+        .mosi_io_num = W5500_MOSI_GPIO,
+        .miso_io_num = W5500_MISO_GPIO,
+        .sclk_io_num = W5500_SCLK_GPIO,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 4096
+    };
     ESP_ERROR_CHECK(spi_bus_initialize(W5500_HOST, &buscfg, SPI_DMA_CH_AUTO));
-    s_eth_netif = esp_netif_new(& (esp_netif_config_t)ESP_NETIF_DEFAULT_ETH());
-    spi_device_interface_config_t devcfg = { .mode = 0, .clock_speed_hz = 25 * 1000 * 1000, .spics_io_num = W5500_CS_GPIO, .queue_size = 20 };
-    eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(W5500_HOST, &devcfg);
-    w5500_config.int_gpio_num = W5500_INT_GPIO;
+
+    esp_netif_config_t cfg = ESP_NETIF_DEFAULT_ETH();
+    esp_netif_t *eth_netif = esp_netif_new(&cfg);
+    s_eth_netif = eth_netif;
+
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
+    phy_config.phy_addr = -1;              // No SMI address
+    phy_config.reset_gpio_num = -1;        // No reset GPIO via PHY API
+    phy_config.autonego_timeout_ms = 0;
+    phy_config.reset_timeout_ms = 0;
+
+    spi_device_interface_config_t devcfg = {
+        .command_bits = 0,
+        .address_bits = 0,
+        .dummy_bits = 0,
+        .mode = 0,
+        .cs_ena_pretrans = 0,
+        .cs_ena_posttrans = 0,
+        .clock_speed_hz = 20 * 1000 * 1000,
+        .spics_io_num = W5500_CS_GPIO,
+        .queue_size = 20
+    };
+
+    eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(W5500_HOST, &devcfg);
+    w5500_config.int_gpio_num = W5500_INT_GPIO;
+
     esp_eth_mac_t *mac = esp_eth_mac_new_w5500(&w5500_config, &mac_config);
     esp_eth_phy_t *phy = esp_eth_phy_new_w5500(&phy_config);
-    esp_eth_config_t config = ETH_DEFAULT_CONFIG(mac, phy);
+    esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
+
     esp_eth_handle_t eth_handle = NULL;
-    ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
+    ESP_ERROR_CHECK(esp_eth_driver_install(&eth_config, &eth_handle));
+
+    set_esp32_mac_on_w5500(eth_handle);
+    
     void *glue = esp_eth_new_netif_glue(eth_handle);
     ESP_ERROR_CHECK(esp_netif_attach(s_eth_netif, glue));
+
     ESP_ERROR_CHECK(esp_eth_start(eth_handle));
+}
+#endif
+
+#if defined(BOARD_RACK32)
+void set_esp32_mac_on_w5500(esp_eth_handle_t eth_handle) {
+    uint8_t esp_mac[6];
+    ESP_ERROR_CHECK(esp_read_mac(esp_mac, ESP_MAC_ETH));
+    
+    // Convert to locally administered address
+    esp_mac[0] = (esp_mac[0] & 0xFE) | 0x02;  // Set bit 1, clear bit 0
+    
+    esp_err_t ret = esp_eth_ioctl(eth_handle, ETH_CMD_S_MAC_ADDR, esp_mac);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set ESP32 MAC on W5500: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "ESP32 MAC applied to W5500: %02x:%02x:%02x:%02x:%02x:%02x", 
+                 esp_mac[0], esp_mac[1], esp_mac[2],
+                 esp_mac[3], esp_mac[4], esp_mac[5]);
+    }
+}
+#endif
+
+#if defined(BOARD_RACK32)
+static void w5500_hardware_reset() {
+    // Configure reset GPIO
+    gpio_config_t rst_conf = {
+        .pin_bit_mask = (1ULL << (gpio_num_t)W5500_RST_GPIO),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&rst_conf);
+    
+    // Perform reset sequence
+    gpio_set_level((gpio_num_t)W5500_RST_GPIO, 0);  // Assert reset
+    vTaskDelay(pdMS_TO_TICKS(10));      // Hold for 10ms
+    gpio_set_level((gpio_num_t)W5500_RST_GPIO, 1);  // De-assert reset
+    vTaskDelay(pdMS_TO_TICKS(100));     // Wait for W5500 to stabilize
 }
 #endif
 
@@ -494,7 +553,7 @@ static void initialize_network_interfaces(void) {
     // Initialize TCP/IP stack
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-
+  
     // Register our unified event handler for all network events
     ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &net_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &net_event_handler, NULL));
@@ -536,30 +595,37 @@ cJSON* get_current_outputs_json() {
 }
 
 /* ---------------------- Hardware & Network Init ---------------------- */
-static esp_err_t spi_master_init(void) {
-    spi_bus_config_t buscfg = {
-        .mosi_io_num = PIN_NUM_MOSI_CAN,
-        .miso_io_num = PIN_NUM_MISO_CAN,
-        .sclk_io_num = PIN_NUM_CLK_CAN,
+static esp_err_t can_module_init(void) {
+
+    spi_bus_config_t can_buscfg = {
+        .mosi_io_num = CAN_MOSI_GPIO,
+        .miso_io_num = CAN_MISO_GPIO,
+        .sclk_io_num = CAN_CLK_GPIO,
         .quadwp_io_num = -1, // Not used
         .quadhd_io_num = -1, // Not used
         .max_transfer_sz = 32
     };
-
-    spi_device_interface_config_t devcfg = {
+    esp_err_t ret = spi_bus_initialize(CAN_HOST, &can_buscfg, SPI_DMA_CH_AUTO);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "CAN SPI bus init failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    spi_device_interface_config_t can_devcfg = {
         .mode = 0,                         // SPI mode 0
-        .clock_speed_hz = 10 * 1000 * 1000, // Clock speed is 10 MHz
-        .spics_io_num = PIN_NUM_CS,
-        .queue_size = 7,                   // We wish to be able to queue 7 transactions at a time
+        .clock_speed_hz = 8 * 1000 * 1000, // Clock speed is 8 MHz
+        .spics_io_num = CAN_CS_GPIO,
+        .queue_size = 10,                   // We wish to be able to queue 10 transactions at a time
     };
 
-    //Initialize the SPI bus
-    ESP_ERROR_CHECK(spi_bus_initialize(SPI_HOST_CAN, &buscfg, SPI_DMA_CH_AUTO));
-
     //Attach the MCP2515 to the SPI bus
-    ESP_ERROR_CHECK(spi_bus_add_device(SPI_HOST_CAN, &devcfg, &mcp_spi_handle));
-
-    ESP_LOGI(TAG, "SPI master initialized successfully.");
+    ret = spi_bus_add_device(CAN_HOST, &can_devcfg, &can_spi_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to add CAN SPI device: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    ESP_LOGI(TAG, "CAN SPI initialized successfully on SPI3_HOST");
     return ESP_OK;
 }
 
@@ -603,11 +669,57 @@ static void load_bindings() {
 }
 
 
+bool set_mcp2515_normal_mode(spi_device_handle_t spi_handle) {
+    // Write to CANCTRL register to set Normal Mode
+    uint8_t normal_mode_cmd[2] = {0x02, 0x00}; // WRITE CANCTRL, value = 0x00 (Normal Mode)
+    
+    spi_transaction_t t = {
+        .flags = 0,  // Move flags to the correct position
+        .length = 16,
+        .tx_buffer = normal_mode_cmd
+    };
+    
+    esp_err_t ret = spi_device_transmit(spi_handle, &t);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set Normal mode");
+        return false;
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // Verify we're in Normal Mode
+    uint8_t read_cmd[3] = {0x03, 0x00, 0x00}; // READ CANCTRL
+    uint8_t response[3] = {0};
+    
+    spi_transaction_t t2 = {
+        .flags = 0,
+        .length = 24,
+        .tx_buffer = read_cmd,
+        .rx_buffer = response
+    };
+    
+    spi_device_transmit(spi_handle, &t2);
+    
+    uint8_t canstat = response[2];
+    uint8_t opmode = (canstat >> 5) & 0x07;
+    
+    ESP_LOGI(TAG, "CANCTRL read back: 0x%02x, OPMODE: %d", canstat, opmode);
+    
+    // OPMODE should be 0 (Normal Mode) or 1 (Sleep Mode)
+    if (response[2] == 0x00) {
+        ESP_LOGI(TAG, "MCP2515 successfully in Normal Mode");
+        return true;
+    } else {
+        ESP_LOGE(TAG, "MCP2515 still not in Normal Mode. OPMODE: %d", opmode);
+        return false;
+    }
+}
+
 /*--------------------------- Main Application Entry Point --------------------*/
 extern "C" void app_main(void) {
     ESP_LOGI(TAG, "Starting up...");
 
-    // 1. Initialize NVS (must be first)
+    // Initialize NVS (must be first)
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
       ESP_ERROR_CHECK(nvs_flash_erase());
@@ -615,15 +727,17 @@ extern "C" void app_main(void) {
     }
     ESP_ERROR_CHECK(ret);
 
-    // 2. Initialize Networking
+    gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
+
+    // Initialize Networking
     s_net_event_group = xEventGroupCreate();
   
     initialize_network_interfaces();
     ESP_LOGI(TAG, "Waiting for network connection...");
     xEventGroupWaitBits(s_net_event_group, ETH_CONNECTED_BIT | WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
     ESP_LOGI(TAG, "Network connected.");
-    
-    // 3. Initialize the core API component and its services
+
+    // Initialize the core API component and its services
     HSG::API::Init api_init;
     api_init.i2c_port = I2C_MASTER_NUM;
     api_init.output_cb = [](int out, int brightness, int fade_ms, const char* state_str){
@@ -650,14 +764,67 @@ extern "C" void app_main(void) {
     hsg_outputs_clear_all();
     
     // Now that the API has loaded the config, we can init the outputs
-    HSG::API::scan_and_prune_i2c(I2C_MASTER_NUM);
+   // HSG::API::scan_and_prune_i2c(I2C_MASTER_NUM);
     cJSON_Delete(initial_config); // Clean up
 
-    // 7. Start Application Tasks
+    // Start Application Tasks
     xTaskCreate(main_task, "can_task", 4096, NULL, 5, NULL);
     xTaskCreate(animation_task, "animation_task", 4096, NULL, 5, NULL);
 
     ESP_LOGI(TAG, "app_main() Initialization complete.");    
+}
+
+bool initialize_mcp2515_with_retry() {
+    const int max_retries = 3;
+    
+    for (int attempt = 1; attempt <= max_retries; attempt++) {
+        ESP_LOGI(TAG, "MCP2515 initialization attempt %d/%d", attempt, max_retries);
+        
+        // Reset the controller
+        if (mcp2515_ptr->reset() != MCP2515::ERROR_OK) {
+            ESP_LOGW(TAG, "MCP2515 reset failed on attempt %d", attempt);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+        if (mcp2515_ptr->setBitrate(CAN_500KBPS, MCP_8MHZ) != MCP2515::ERROR_OK) {
+            ESP_LOGW(TAG, "MCP2515 bitrate setting failed on attempt %d", attempt);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+        if (mcp2515_ptr->setNormalMode() != MCP2515::ERROR_OK) {
+            ESP_LOGW(TAG, "MCP2515 normal mode setting failed on attempt %d", attempt);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+        
+        // Verify we're in normal mode by reading CANSTAT
+        uint8_t read_cmd[3] = {0x03, 0x0E, 0x00}; // READ CANSTAT
+        uint8_t response[3] = {0};
+        
+        spi_transaction_t t = {
+            .flags = 0,
+            .length = 24,
+            .tx_buffer = read_cmd,
+            .rx_buffer = response
+        };
+        
+        if (spi_device_transmit(can_spi_handle, &t) == ESP_OK) {
+            uint8_t canstat = response[2];
+            uint8_t opmode = (canstat >> 5) & 0x07;
+            
+            if (opmode == 0) { // Normal mode
+                ESP_LOGI(TAG, "MCP2515 successfully initialized and in Normal Mode (CANSTAT: 0x%02x)", canstat);
+                return true;
+            } else {
+                ESP_LOGW(TAG, "MCP2515 not in normal mode (OPMODE: %d) on attempt %d", opmode, attempt);
+            }
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    
+    ESP_LOGE(TAG, "MCP2515 initialization failed after %d attempts", max_retries);
+    return false;
 }
 
 /*--------------------------- Main Application Task -------------------------*/
@@ -665,116 +832,132 @@ void main_task(void *pvParameter)
 {
     ESP_LOGI(TAG, "Main task started.");
     
-    if (spi_master_init() != ESP_OK) {
-        ESP_LOGE(TAG, "SPI master initialization failed. Halting task.");
+     if (can_module_init() != ESP_OK) {
+        ESP_LOGE(TAG, "CAN module initialization failed. Halting task.");
         vTaskDelete(NULL);
     }
+    mcp2515_ptr = new MCP2515(&can_spi_handle);
     
-    MCP2515 mcp2515(&mcp_spi_handle);
-    mcp2515.reset();
-    ESP_ERROR_CHECK(mcp2515.setBitrate(CAN_500KBPS, MCP_8MHZ));
-    ESP_ERROR_CHECK(mcp2515.setNormalMode());
-    ESP_LOGI(TAG, "MCP2515 initialized successfully.");
+    // Enhanced initialization with retry logic
+    bool can_available = initialize_mcp2515_with_retry();
+    
+    if (!can_available) {
+        ESP_LOGW(TAG, "MCP2515 not available after retries, running without CAN support.");
+    } else {
+        ESP_LOGI(TAG, "MCP2515 initialized successfully and ready for operation.");
+    }
 
+    // GPIO interrupt setup (keep your existing code)
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_NEGEDGE;
-    io_conf.pin_bit_mask = (1ULL << PIN_NUM_INT_CAN);
+    io_conf.pin_bit_mask = (1ULL << CAN_INT_GPIO);
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     gpio_config(&io_conf);
 
     gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
     g_last_mutex = xSemaphoreCreateMutex();
-    gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
-   
-    ESP_ERROR_CHECK(gpio_isr_handler_add((gpio_num_t)PIN_NUM_INT_CAN, gpio_isr_handler, (void*)PIN_NUM_INT_CAN));
+    ESP_ERROR_CHECK(gpio_isr_handler_add((gpio_num_t)CAN_INT_GPIO, gpio_isr_handler, (void*)CAN_INT_GPIO));
 
     load_bindings();
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+//    bool can_available = true;
+//    if (mcp2515_ptr == nullptr || mcp2515_ptr->reset() != MCP2515::ERROR_OK) {
+//        ESP_LOGW(TAG, "MCP2515 not detected, running without CAN support.");
+//        can_available = false;
+//    }
+//    test_can_hardware();
 
     while (1) {
-        if (mcp2515.checkError()) {
-            uint8_t err_flags = mcp2515.getErrorFlags();
-            // Check for the bus-off flag (TXBO)
-            if (err_flags & MCP2515::EFLG_TXBO) {
-                ESP_LOGE(TAG, "CAN bus-off error detected! Attempting to reset MCP2515...");
-                // Attempt to reset the controller to clear the bus-off state
-                if (mcp2515.reset() == MCP2515::ERROR_OK) {
-                    // Re-apply the configuration after reset
-                    mcp2515.setBitrate(CAN_500KBPS, MCP_8MHZ);
-                    mcp2515.setNormalMode();
-                    ESP_LOGI(TAG, "MCP2515 reset and reconfigured successfully.");
+        if (can_available) {
+            if (mcp2515_ptr->checkError()) {
+                uint8_t err_flags = mcp2515_ptr->getErrorFlags();
+                // Check for the bus-off flag (TXBO)
+                if (err_flags & MCP2515::EFLG_TXBO) {
+                    ESP_LOGE(TAG, "CAN bus-off error detected! Attempting to reset MCP2515...");
+                    // Attempt to reset the controller to clear the bus-off state
+                    if (mcp2515_ptr->reset() == MCP2515::ERROR_OK) {
+                        // Re-apply the configuration after reset
+                        mcp2515_ptr->setBitrate(CAN_500KBPS, MCP_8MHZ);
+                        mcp2515_ptr->setNormalMode();
+                        ESP_LOGI(TAG, "MCP2515 reset and reconfigured successfully.");
+                    } else {
+                        ESP_LOGE(TAG, "MCP2515 reset failed.");
+                    }
                 } else {
-                    ESP_LOGE(TAG, "MCP2515 reset failed.");
+                    ESP_LOGW(TAG, "CAN error detected (flags: 0x%02X), clearing flags.", err_flags);
+                    mcp2515_ptr->clearRXnOVRFlags();
+                    mcp2515_ptr->clearInterrupts();
                 }
-            } else {
-                ESP_LOGW(TAG, "CAN error detected (flags: 0x%02X), clearing flags.", err_flags);
-                mcp2515.clearRXnOVRFlags();
-                mcp2515.clearInterrupts();
+                // Give the bus a moment to settle after an error
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue; // Skip trying to read a message this cycle
             }
-             // Give the bus a moment to settle after an error
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            continue; // Skip trying to read a message this cycle
-        }
-        // --- Check for CAN messages ---
-       uint32_t io_num;
-        if (xQueueReceive(gpio_evt_queue, &io_num, pdMS_TO_TICKS(5000))) {
-            can_frame can_frame;
-            if (mcp2515.readMessage(&can_frame) == MCP2515::ERROR_OK) {
-                ESP_LOGI(TAG, "CAN Frame Received! ID: 0x%lX", can_frame.can_id);
-                // We need to copy the data to the HSG_CanFrame struct
-                // 1. Create a temporary frame of the correct API type
-                HSG_CanFrame api_frame;
-                api_frame.id = can_frame.can_id;
-                api_frame.dlc = can_frame.can_dlc;
-                memcpy(api_frame.data, can_frame.data, can_frame.can_dlc);
-                // 2. Call the public function to update the API's internal cache
-                HSG::API::update_last_can(api_frame);
-                
-                // --- FIX: Decode the message using the new protocol ---
-                CanMessageType msgType = getMessageType(can_frame.can_id);
+            // --- Check for CAN messages ---
+            uint32_t io_num;
+            if (xQueueReceive(gpio_evt_queue, &io_num, pdMS_TO_TICKS(5000))) {
+                can_frame can_frame;
+                if (mcp2515_ptr->readMessage(&can_frame) == MCP2515::ERROR_OK) {
+                    ESP_LOGI(TAG, "CAN Frame Received! ID: 0x%lX", can_frame.can_id);
+                    // We need to copy the data to the HSG_CanFrame struct
+                    // 1. Create a temporary frame of the correct API type
+                    HSG_CanFrame api_frame;
+                    api_frame.id = can_frame.can_id;
+                    api_frame.dlc = can_frame.can_dlc;
+                    memcpy(api_frame.data, can_frame.data, can_frame.can_dlc);
+                    // 2. Call the public function to update the API's internal cache
+                    HSG::API::update_last_can(api_frame);
+                    
+                    // --- FIX: Decode the message using the new protocol ---
+                    CanMessageType msgType = getMessageType(can_frame.can_id);
 
-                // --- NEW: Rule-matching engine ---
-                // Assume switch sends: [button_num, action_type]
-                if (msgType == LIGHTING_COMMAND) {
-                    if (can_frame.can_dlc >= 2) {
-                        int switchId = getNodeId(can_frame.can_id);
-                        int button = can_frame.data[0];
-                        const char* action = (can_frame.data[1] == 1) ? "CLICK" : "HOLD"; // Example action mapping
+                    // --- NEW: Rule-matching engine ---
+                    // Assume switch sends: [button_num, action_type]
+                    if (msgType == LIGHTING_COMMAND) {
+                        if (can_frame.can_dlc >= 2) {
+                            int switchId = getNodeId(can_frame.can_id);
+                            int button = can_frame.data[0];
+                            const char* action = (can_frame.data[1] == 1) ? "CLICK" : "HOLD"; // Example action mapping
 
-                        // Find a matching rule in our bindings
-                        for (const auto& rule : g_bindings) {
-                            if (rule.switchId == switchId && rule.button == button && rule.onAction == action) {
-                                ESP_LOGI(TAG, "CAN Match Found: Switch %d, Button %d", switchId, button);
-                                
-                                Command cmd;
-                                cmd.type = rule.targetType;
-                                cmd.output_id = rule.outputId;
-                                cmd.group_name = rule.groupName;
-                                cmd.fade_ms = rule.fade_ms;
+                            // Find a matching rule in our bindings
+                            for (const auto& rule : g_bindings) {
+                                if (rule.switchId == switchId && rule.button == button && rule.onAction == action) {
+                                    ESP_LOGI(TAG, "CAN Match Found: Switch %d, Button %d", switchId, button);
+                                    
+                                    Command cmd;
+                                    cmd.type = rule.targetType;
+                                    cmd.output_id = rule.outputId;
+                                    cmd.group_name = rule.groupName;
+                                    cmd.fade_ms = rule.fade_ms;
 
-                                // Handle brightness/state
-                                if (rule.brightness != -1) {
-                                    cmd.brightness = rule.brightness;
-                                } else if (rule.state == "ON") {
-                                    cmd.brightness = 100;
-                                } else if (rule.state == "OFF") {
-                                    cmd.brightness = 0;
+                                    // Handle brightness/state
+                                    if (rule.brightness != -1) {
+                                        cmd.brightness = rule.brightness;
+                                    } else if (rule.state == "ON") {
+                                        cmd.brightness = 100;
+                                    } else if (rule.state == "OFF") {
+                                        cmd.brightness = 0;
+                                    }
+                                    // TODO: Add "TOGGLE" logic if needed
+
+                                    processCommand(cmd);
+                                    break; // Stop after finding the first match
                                 }
-                                // TODO: Add "TOGGLE" logic if needed
-
-                                processCommand(cmd);
-                                break; // Stop after finding the first match
                             }
                         }
                     }
+                    // You could add else if blocks here to handle SENSOR_DATA or HEARTBEAT
+                    else if (msgType == HEARTBEAT) {
+                        uint8_t nodeId = getNodeId(can_frame.can_id);
+                        ESP_LOGI(TAG, "Heartbeat received from node 0x%02X", nodeId);
+                    }
                 }
-                // You could add else if blocks here to handle SENSOR_DATA or HEARTBEAT
-                else if (msgType == HEARTBEAT) {
-                    uint8_t nodeId = getNodeId(can_frame.can_id);
-                    ESP_LOGI(TAG, "Heartbeat received from node 0x%02X", nodeId);
-                }
-                // --- END FIX ---
             }
+        }else {
+            // If CAN is not available, just delay to avoid a tight loop
+            // Just idle so other tasks (MQTT/HTTP/animation) keep running
+            vTaskDelay(pdMS_TO_TICKS(1000));
         }
     }
 }
@@ -795,20 +978,6 @@ static void IRAM_ATTR gpio_isr_handler(void* arg) {
     xQueueSendFromISR(gpio_evt_queue, &gpio_num, nullptr);
 }
 
-/*
-static esp_err_t i2c_master_init(void) {
-    i2c_config_t conf = {};
-    conf.mode = I2C_MODE_MASTER;
-    conf.sda_io_num = I2C_MASTER_SDA_IO;
-    conf.scl_io_num = I2C_MASTER_SCL_IO;
-    conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.master.clk_speed = I2C_MASTER_FREQ_HZ;
-    esp_err_t err = i2c_param_config(I2C_MASTER_NUM, &conf);
-    if (err != ESP_OK) return err;
-    return i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0);
-}
-*/
 static esp_err_t i2c_master_init(void) {
     i2c_master_bus_config_t i2c_mst_config = {};
     i2c_mst_config.clk_source = I2C_CLK_SRC_DEFAULT;

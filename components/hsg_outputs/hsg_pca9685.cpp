@@ -65,36 +65,36 @@ static esp_err_t write_reg(uint8_t addr, uint8_t reg, uint8_t val) {
 // -----------------------------------------------------------------------------
 // Initialize a single PCA9685 chip using the new driver
 esp_err_t pca9685_init(uint8_t addr, int freq_hz) {
-    ESP_LOGI(TAG, "Init PCA9685 @0x%02X freq=%dHz", addr, freq_hz);
 
+    esp_err_t ret;
+    ret = write_reg(addr, 0x00, 0x10); // Attempt to put the device into sleep mode.
+    
+    if (ret != ESP_OK) {
+        // If the first write fails, the device is not present or not responding.
+        ESP_LOGE(TAG, "PCA9685 @0x%02X did not respond. Bypassing setup.", addr);
+        return ret; // Propagate the error code up to the calling function.
+    }
+
+    ESP_LOGI(TAG, "PCA9685 @0x%02X is online. Freq=%dHz", addr, freq_hz);
+    
     float prescale_val = 25000000.0 / (4096.0 * freq_hz) - 1;
     uint8_t prescale = (uint8_t)floor(prescale_val + 0.5);
 
-    ESP_ERROR_CHECK(write_reg(addr, 0x00, 0x10)); // MODE1 sleep
-    ESP_ERROR_CHECK(write_reg(addr, 0xFE, prescale)); // Set prescale
-    ESP_ERROR_CHECK(write_reg(addr, 0x00, 0xA1)); // MODE1 auto-increment, restart
+    // Check every subsequent write for errors, but don't crash.
+    ret = write_reg(addr, 0xFE, prescale); // Set prescale
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set prescale on PCA @0x%02X", addr);
+        return ret;
+    }
+
+    ret = write_reg(addr, 0x00, 0xA1); // MODE1 auto-increment, restart
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to restart PCA @0x%02X", addr);
+        return ret;
+    }
     vTaskDelay(pdMS_TO_TICKS(5)); // Wait for oscillator
     return ESP_OK;
 }
-/*
-esp_err_t pca9685_init(i2c_port_t port, uint8_t addr, int freq_hz)
-{
-    ESP_LOGI(TAG, "Init PCA9685 @0x%02X freq=%dHz", addr, freq_hz);
 
-    // MODE1 reset
-    ESP_ERROR_CHECK(write_reg(port, addr, 0x00, 0x00));
-
-    // Calculate and set prescale for the requested frequency
-    float prescale_val = 25000000.0 / (4096.0 * freq_hz) - 1;
-    uint8_t prescale = (uint8_t)floor(prescale_val + 0.5);
-
-    // Go to sleep before setting prescale, then wake up with auto-increment
-    ESP_ERROR_CHECK(write_reg(port, addr, 0x00, 0x10)); // MODE1 sleep
-    ESP_ERROR_CHECK(write_reg(port, addr, 0xFE, prescale)); // Set prescale register
-    ESP_ERROR_CHECK(write_reg(port, addr, 0x00, 0xA1)); // MODE1 auto-increment, restart
-
-    return ESP_OK;
-}
-*/
 
 } // namespace hsg_pca9685

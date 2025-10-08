@@ -20,6 +20,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "lwip/opt.h"
+#include "hardware_config.h"
 
 static const char* TAG = "HSG-API";
 static const char* NVS_NS = "cfg";
@@ -187,7 +188,7 @@ static esp_err_t h_adopt(httpd_req_t* req) {
         cJSON_AddNumberToObject(sys, "sketchSpaceUsedBytes", running->size);
     }
     cJSON_AddItemToObject(root, "system", sys);
-
+/*
     // i2c scan (only valid PCA9685 addresses)
     cJSON* i2c = cJSON_CreateObject();
     cJSON* pca = cJSON_CreateArray();
@@ -199,59 +200,10 @@ static esp_err_t h_adopt(httpd_req_t* req) {
         }
         vTaskDelay(pdMS_TO_TICKS(2));
     }
-//    for (uint8_t addr = 0x40; addr <= 0x47; ++addr) {
-//        if (i2c_probe(addr) == ESP_OK) {
-//            ESP_LOGI(TAG, "Adopt: Found PCA9685 at 0x%02X", addr);
-//            cJSON_AddItemToArray(pca, cJSON_CreateNumber(addr));
-//        }
-//        vTaskDelay(pdMS_TO_TICKS(2));
-//    }
     cJSON_AddItemToObject(i2c, "pca9685", pca);
     cJSON_AddItemToObject(root, "i2c", i2c);
-
+*/
     return send_json(req, root);
-}
-
-static esp_err_t h_bindings_get(httpd_req_t* req) {
-    cJSON* root = load_cfg_json();
-    ensure_layout(root);
-    cJSON* config = cJSON_GetObjectItem(root, "config");
-    cJSON* bindings = cJSON_GetObjectItem(config, "bindings");
-    if (!bindings) { // Ensure bindings array exists
-        bindings = cJSON_CreateArray();
-    }
-    char* out = cJSON_Print(bindings); // Use Print to keep formatting
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, out ? out : "[]");
-    if (out) free(out);
-    cJSON_Delete(root);
-    return ESP_OK;
-}
-
-static esp_err_t h_bindings_post(httpd_req_t* req) {
-    auto body = req_read_all(req);
-    cJSON* posted_bindings = cJSON_Parse(body.c_str());
-    if (!cJSON_IsArray(posted_bindings)) {
-        if(posted_bindings) cJSON_Delete(posted_bindings);
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body must be a JSON array");
-    }
-
-    cJSON* root = load_cfg_json();
-    ensure_layout(root);
-    cJSON* config = cJSON_GetObjectItem(root, "config");
-    
-    // Replace the bindings array
-    if (cJSON_HasObjectItem(config, "bindings")) {
-        cJSON_DeleteItemFromObject(config, "bindings");
-    }
-    cJSON_AddItemToObject(config, "bindings", posted_bindings);
-
-    save_cfg_json(root);
-    cJSON_Delete(root);
-    
-    // Tell can_task to reload the bindings
-    // (A simple way is a reboot, a more advanced way is using an event group)
-    return httpd_resp_sendstr(req, "OK");
 }
 
 // GET /api/config  (returns ONLY the "config" object)
@@ -418,6 +370,21 @@ static esp_err_t h_ota(httpd_req_t* req) {
     return ESP_OK;
 }
 
+static esp_err_t h_i2c_scan(httpd_req_t *req) {
+    ESP_LOGI("API", "Received request to scan I2C devices.");
+
+    // Call the existing scan and prune function
+    // This is the same function we removed from app_main
+    HSG::API::scan_and_prune_i2c(I2C_MASTER_NUM);
+
+    // Send a success response
+    const char* resp_str = "{\"status\": \"success\", \"message\": \"I2C scan and configuration prune complete.\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp_str, strlen(resp_str));
+
+    return ESP_OK;
+}
+
 EventGroupHandle_t g_event_group = nullptr;
 
 } // namespace (anon)
@@ -514,11 +481,11 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     httpd_uri_t can_last   { .uri="/api/can/last", .method=HTTP_GET,   .handler=h_can_last,   .user_ctx=nullptr };
     httpd_uri_t ota_post   { .uri="/api/ota",      .method=HTTP_POST,  .handler=h_ota,        .user_ctx=nullptr };
     httpd_uri_t favicon_get = { .uri="/favicon.ico", .method=HTTP_GET, .handler=h_favicon,    .user_ctx=nullptr };
-    httpd_uri_t bindings_get = { .uri="/api/bindings", .method=HTTP_GET, .handler=h_bindings_get, .user_ctx=nullptr };
-    httpd_uri_t bindings_post = { .uri="/api/bindings", .method=HTTP_POST, .handler=h_bindings_post, .user_ctx=nullptr };
     httpd_uri_t config_page = { .uri="/config", .method=HTTP_GET, .handler=h_config_page, .user_ctx=nullptr };
     httpd_uri_t state_get = { .uri="/api/state", .method=HTTP_GET, .handler=h_state_get, .user_ctx=nullptr };
+    httpd_uri_t i2c_scan_uri = { .uri="/api/i2c/scan", .method=HTTP_POST, .handler=h_i2c_scan, .user_ctx=nullptr };
 
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &i2c_scan_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &state_get));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &config_page));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &favicon_get));
@@ -530,8 +497,6 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &cmd_post));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &can_last));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &ota_post));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &bindings_get));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &bindings_post));
 
     httpd_uri_t ws = {
         .uri        = "/ws",

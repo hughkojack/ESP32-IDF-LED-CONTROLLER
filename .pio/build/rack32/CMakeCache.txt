@@ -15,10 +15,10 @@
 ########################
 
 //Build for Olimex ESP32-POE board
-BOARD_OLIMEX_POE:BOOL=ON
+BOARD_OLIMEX_POE:BOOL=OFF
 
 //Build for Rack32 board with W5500
-BOARD_RACK32:BOOL=OFF
+BOARD_RACK32:BOOL=ON
 
 //Path to a program.
 CMAKE_ADDR2LINE:FILEPATH=C:/Users/Hugh/.platformio/packages/toolchain-xtensa-esp32@8.4.0+2021r2-patch5/bin/xtensa-esp32-elf-addr2line.exe

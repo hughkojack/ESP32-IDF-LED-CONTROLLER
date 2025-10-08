@@ -8,6 +8,14 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         /* Simple spinner animation */
+        .selected-channel-pill {
+            background-color: #374151; /* gray-700 */
+            color: #d1d5db; /* gray-300 */
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-family: monospace;
+        }
         .spinner {
             border: 4px solid rgba(0, 0, 0, .1);
             border-left-color: #4f46e5;
@@ -238,7 +246,22 @@
                         </button>
                     </div>
                 </div>
-
+                
+                <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                    <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">I2C Scan</h2>
+                    <div class="space-y-4">
+                        <div>
+                            <label for="otaFile" class="block text-sm font-medium text-gray-300">If you have added or removed PCA9685 extender boards, click this button to re-scan the I2C bus.
+                            This will update the output mappings and remove any devices that are no longer detected.</label>
+                        </div>
+                        <button id="scanI2cButton" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center">
+                            <span id="scanI2cBtnText">Scan for I2C Devices</span>
+                            <div id="scanI2cSpinner" class="spinner hidden ml-2"></div>
+                        </button>
+                        <p id="scanStatus" style="margin-top: 10px;"></p>
+                    </div>
+                </div>
+                
                 <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
                     <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">Device Actions</h2>
                     <button id="restartBtn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center">
@@ -286,6 +309,11 @@
         const uploadFwBtn = document.getElementById('uploadFwBtn');
         const uploadBtnText = document.getElementById('uploadBtnText');
         const uploadSpinner = document.getElementById('uploadSpinner');
+        const scanI2cBtnText = document.getElementById('scanI2cBtnText');
+        const scanI2cSpinner = document.getElementById('scanI2cSpinner');
+        const scanI2cButton = document.getElementById('scanI2cButton');
+        const statusEl = document.getElementById('scanStatus');
+
         const restartBtn = document.getElementById('restartBtn');
         const restartBtnText = document.getElementById('restartBtnText');
         const restartSpinner = document.getElementById('restartSpinner');
@@ -316,6 +344,7 @@
         addGroupBtn.addEventListener('click', () => addGroup());
         sendCommandBtn.addEventListener('click', sendCommand);
         uploadFwBtn.addEventListener('click', uploadFirmware);
+        scanI2cButton.addEventListener('click', scanI2cDevices);
         restartBtn.addEventListener('click', restartDevice);
         navTabs.addEventListener('click', (event) => {
             if (event.target.classList.contains('tab-button')) {
@@ -340,17 +369,13 @@
             mainContent.classList.add('hidden');
             navTabs.classList.add('hidden');
             try {
-                const [adoptResponse, configResponse, bindingsResponse] = await Promise.all([
+                const [adoptResponse, configResponse] = await Promise.all([
                     fetch(`/api/adopt`),
-                    fetch(`/api/config`),
-                    fetch(`/api/bindings`)
+                    fetch(`/api/config`)
                 ]);
-                if (!adoptResponse.ok || !configResponse.ok || !bindingsResponse.ok) throw new Error(`HTTP error!`);
+                if (!adoptResponse.ok || !configResponse.ok) throw new Error(`HTTP error!`);
                 const adoptData = await adoptResponse.json();
                 const configData = await configResponse.json();
-                const bindingsData = await bindingsResponse.json();
-                // Add bindings to the config object for populating the UI
-                configData.bindings = bindingsData;
                 populateUI({ ...adoptData, config: configData });
 
                 // Add save buttons to the relevant sections
@@ -374,6 +399,7 @@
         }
 
         function populateUI(data) {
+            // --- Populate Device Info (no changes here) ---
             fwName.textContent = data.firmware?.name || '-';
             fwVersion.textContent = data.firmware?.version || 'N/A';
             fwMaker.textContent = data.firmware?.maker || '-';
@@ -383,23 +409,33 @@
             sysHeap.textContent = data.system?.heapFreeBytes || '-';
             sysSketch.textContent = data.system?.sketchSpaceUsedBytes || '-';
 
+            // Get the labels from the config
             const labels = data.config.labels || {};
+            
+            // --- CORRECTED I2C MAPPING LOGIC ---
+            i2cMapping.innerHTML = ''; // Clear the section first
 
-            i2cMapping.innerHTML = '';
-            if (data.i2c && Array.isArray(data.i2c.pca9685) && data.i2c.pca9685.length > 0) {
-                data.i2c.pca9685.forEach(addr => {
-                    const hexAddr = `0x${addr.toString(16)}`;
+            // Check if there is a saved i2c configuration
+            if (data.config && data.config.i2c && data.config.i2c.pca9685 && Object.keys(data.config.i2c.pca9685).length > 0) {
+                
+                // Loop through each saved device in the configuration
+                for (const [hexAddr, mappings] of Object.entries(data.config.i2c.pca9685)) {
+                    const addr = parseInt(hexAddr.substring(2), 16);
+                    
+                    // 1. Create the UI container for this device
                     const deviceContainer = document.createElement('div');
                     deviceContainer.innerHTML = `<h3 class="font-bold text-indigo-400 mb-2">PCA9685 at ${hexAddr}</h3>`;
                     const grid = document.createElement('div');
                     grid.className = 'grid grid-cols-4 md:grid-cols-8 gap-x-3 gap-y-3';
+
+                    // 2. Create the 16 input fields for this device
                     for (let i = 0; i < 16; i++) {
-                        const outputNum = data.config?.i2c?.pca9685?.[hexAddr]?.[i] || 0;
+                        // Get the saved logical output number for this channel (or 0 if not set)
+                        const outputNum = Array.isArray(mappings) ? (mappings[i] || 0) : 0;
                         const labelText = (outputNum > 0 && labels[outputNum]) ? labels[outputNum] : '';
 
-                        // MODIFIED: Create a container for each channel with both inputs side-by-side
                         const inputContainer = document.createElement('div');
-                        inputContainer.className = 'flex flex-col space-y-1'; // Use flex-col for vertical stacking
+                        inputContainer.className = 'flex flex-col space-y-1';
                         inputContainer.innerHTML = `
                             <label for="pca-${addr}-${i}" class="text-xs text-center font-mono">Ch.${i}</label>
                             <input type="number" id="pca-${addr}-${i}" data-addr="${addr}" data-port="${i}" value="${outputNum}" title="Logical Output Number"
@@ -411,11 +447,13 @@
                     }
                     deviceContainer.appendChild(grid);
                     i2cMapping.appendChild(deviceContainer);
-                });
+                }
             } else {
-                i2cMapping.innerHTML = '<p class="text-gray-400">No PCA9685 devices detected.</p>';
+                // This message is shown if no devices are in the saved config
+                i2cMapping.innerHTML = '<p class="text-gray-400">No configured PCA9685 devices. Use the "Scan for I2C Devices" button in the Advanced tab to detect and add them.</p>';
             }
 
+            // --- Populate Network, Groups, and Bindings (no changes here) ---
             if (data.config) {
                 if (data.config.wifi) {
                     wifiSsid.value = data.config.wifi.ssid || '';
@@ -431,18 +469,6 @@
                     mqttPassword.value = data.config.mqtt.password || '';
                 }
 
-                if (data.config.i2c?.pca9685) {
-                    for (const [hexAddr, mappings] of Object.entries(data.config.i2c.pca9685)) {
-                        const addr = parseInt(hexAddr.substring(2), 16);
-                        if (Array.isArray(mappings)) {
-                            mappings.forEach((mapValue, i) => {
-                                const input = document.getElementById(`pca-${addr}-${i}`);
-                                if (input) input.value = mapValue;
-                            });
-                        }
-                    }
-                }
-
                 groupContainer.innerHTML = '';
                 if (data.config.groups) {
                     for (const [name, outputs] of Object.entries(data.config.groups)) {
@@ -451,7 +477,6 @@
                 }
             }
 
-            // Populate Bindings Table
             if (data.config && data.config.bindings) {
                 currentBindings = data.config.bindings;
                 renderBindingsTable();
@@ -523,33 +548,125 @@
         }
 
         function addGroup(name = '', outputs = []) {
-            const groupDiv = document.createElement('div');
-            groupDiv.className = 'p-4 border border-gray-700 rounded-lg';
-            groupDiv.innerHTML = `
-                <div class="flex items-center gap-2 mb-4">
-                    <input type="text" value="${name}" placeholder="Group Name" class="group-name w-1/3 bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                    <button class="remove-group-btn bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md transition duration-300">-</button>
-                </div>`;
-            const availableOutputs = getAvailableOutputs();
-            if (availableOutputs.length > 0) {
-                const checkboxGrid = document.createElement('div');
-                checkboxGrid.className = 'grid grid-cols-4 sm:grid-cols-8 md:grid-cols-12 gap-4';
-                availableOutputs.forEach(outputId => {
-                    const isChecked = outputs.includes(outputId);
-                    checkboxGrid.innerHTML += `
-                        <label class="group-output-label text-xs">
-                            <span>${outputId}</span>
-                            <input type="checkbox" value="${outputId}" class="group-output-checkbox mt-1" ${isChecked ? 'checked' : ''}>
-                        </label>`;
+            // Helper function to get a map of all defined labels like {1: "Kitchen", 5: "Porch"}
+            const getLabelsMap = () => {
+                const labels = {};
+                document.querySelectorAll('.i2c-label-input').forEach(input => {
+                    const numberInput = input.parentElement.querySelector('input[type="number"]');
+                    if (numberInput) {
+                        const outputId = parseInt(numberInput.value, 10);
+                        const labelText = input.value.trim();
+                        if (outputId > 0 && labelText) {
+                            labels[outputId] = labelText;
+                        }
+                    }
                 });
-                groupDiv.appendChild(checkboxGrid);
-            } else {
-                groupDiv.innerHTML += '<p class="text-sm text-gray-400">No logical outputs defined in I2C Mapping tab.</p>';
-            }
+                return labels;
+            };
+
+            // --- Create the main container for this group ---
+            const groupDiv = document.createElement('div');
+            groupDiv.className = 'group-definition-container p-4 border border-gray-700 rounded-lg';
+
+            // --- Create the HTML for both View and Edit states ---
+            const availableOutputs = getAvailableOutputs();
+            const allLabels = getLabelsMap();
+
+            groupDiv.innerHTML = `
+                <div class="group-view-state">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-lg font-semibold text-white group-name-display">${name || 'New Group'}</h3>
+                        <div>
+                            <button class="edit-group-btn text-sm bg-gray-600 hover:bg-gray-500 text-white font-bold py-1 px-3 rounded-md transition duration-300">Edit</button>
+                            <button class="remove-group-btn text-sm bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-3 rounded-md transition duration-300">-</button>
+                        </div>
+                    </div>
+                    <div class="selected-channels-list flex flex-wrap gap-2">
+                        </div>
+                </div>
+
+                <div class="group-edit-state hidden">
+                    <div class="flex items-center gap-2 mb-4">
+                        <input type="text" value="${name}" placeholder="Group Name" class="group-name-input w-1/3 bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600">
+                        <button class="done-editing-btn text-sm bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md transition duration-300">Done</button>
+                    </div>
+                    <div class="available-channels-grid grid grid-cols-4 sm:grid-cols-8 md:grid-cols-12 gap-4">
+                        ${availableOutputs.length > 0 ? availableOutputs.map(outputId => {
+                            const isChecked = outputs.includes(outputId);
+                            return `
+                                <label class="group-output-label text-xs" title="${allLabels[outputId] || `Output ${outputId}`}">
+                                    <span>${outputId}</span>
+                                    <input type="checkbox" value="${outputId}" class="group-output-checkbox mt-1" ${isChecked ? 'checked' : ''}>
+                                </label>`;
+                        }).join('') : '<p class="text-sm text-gray-400 col-span-full">No logical outputs defined in I2C Mapping tab.</p>'}
+                    </div>
+                </div>
+            `;
+
+            // --- Add the new group element to the page ---
             groupContainer.appendChild(groupDiv);
-            groupDiv.querySelector('.remove-group-btn').addEventListener('click', () => groupDiv.remove());
-        }
-        
+
+            // --- Get references to the new elements we just created ---
+            const viewState = groupDiv.querySelector('.group-view-state');
+            const editState = groupDiv.querySelector('.group-edit-state');
+            const editBtn = groupDiv.querySelector('.edit-group-btn');
+            const doneBtn = groupDiv.querySelector('.done-editing-btn');
+            const removeBtn = groupDiv.querySelector('.remove-group-btn');
+            const groupNameDisplay = groupDiv.querySelector('.group-name-display');
+            const groupNameInput = groupDiv.querySelector('.group-name-input');
+            const selectedChannelsList = groupDiv.querySelector('.selected-channels-list');
+
+            // --- Function to update the view state based on what's checked in the edit state ---
+            const updateViewState = () => {
+                const currentName = groupNameInput.value.trim();
+                groupNameDisplay.textContent = currentName || 'New Group';
+                
+                selectedChannelsList.innerHTML = ''; // Clear previous list
+                const labels = getLabelsMap();
+                const checkedBoxes = editState.querySelectorAll('.group-output-checkbox:checked');
+                
+                if (checkedBoxes.length === 0) {
+                    selectedChannelsList.innerHTML = '<p class="text-xs text-gray-500">No outputs selected.</p>';
+                    return;
+                }
+
+                checkedBoxes.forEach(checkbox => {
+                    const outputId = checkbox.value;
+                    const label = labels[outputId] || `Output ${outputId}`;
+                    const pill = document.createElement('span');
+                    pill.className = 'selected-channel-pill';
+                    pill.textContent = `${outputId}: ${label}`;
+                    selectedChannelsList.appendChild(pill);
+                });
+            };
+
+            // --- Wire up the event listeners ---
+            editBtn.addEventListener('click', () => {
+                viewState.classList.add('hidden');
+                editState.classList.remove('hidden');
+            });
+
+            doneBtn.addEventListener('click', () => {
+                editState.classList.add('hidden');
+                viewState.classList.remove('hidden');
+                updateViewState(); // Update the view with the new selections
+            });
+
+            removeBtn.addEventListener('click', () => {
+                // We add a confirmation dialog for safety
+                if (confirm(`Are you sure you want to delete the group "${groupNameDisplay.textContent}"?`)) {
+                    groupDiv.remove();
+                }
+            });
+
+            // --- Set the initial view ---
+            updateViewState();
+
+            // If a new group is added (name is empty), automatically switch to edit mode
+            if (!name) {
+                editBtn.click();
+            }
+        }        
         function getAvailableOutputs() {
             const outputs = new Set();
             i2cMapping.querySelectorAll('input[type="number"]').forEach(input => {
@@ -568,7 +685,6 @@
             if (topicPrefix && !topicPrefix.endsWith('/')) {
                 topicPrefix += '/';
             }
-
             const configToSave = {
                 wifi: {
                     ssid: wifiSsid.value.trim(),
@@ -584,25 +700,21 @@
                 },
                 i2c: getI2cMappingFromUi(),
                 groups: getGroupsFromUi(),
-                labels: getLabelsFromUi()
+                labels: getLabelsFromUi(),
+                bindings: currentBindings // Add the current bindings array here
             };
 
             setLoadingState(clickedButton, textEl, spinnerEl, true);
             showStatus('Saving all configurations...', 'loading');
             try {
-                const saveMainConfig = await fetch(`/api/config`, {
+                // We now only need to send ONE request to /api/config
+                const response = await fetch(`/api/config`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(configToSave)
                 });
-                const saveBindings = fetch(`/api/bindings`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(currentBindings)
-                });
-                const [mainResponse, bindingsResponse] = await Promise.all([saveMainConfig, saveBindings]);
 
-                if (!mainResponse.ok || !bindingsResponse.ok) throw new Error(`HTTP error!`);
+                if (!response.ok) throw new Error(`HTTP error!`);
                 showStatus('Configurations saved successfully! Restart device to apply network changes.', 'success');
             } catch (error) {
                 console.error('Save error:', error);
@@ -626,20 +738,42 @@
 
         function getGroupsFromUi() {
             const groups = {};
-            groupContainer.querySelectorAll('.p-4').forEach(groupDiv => {
-                const name = groupDiv.querySelector('.group-name').value.trim();
+            // Find each group's main container
+            groupContainer.querySelectorAll('.group-definition-container').forEach(groupDiv => {
+                // Find the name from the input field within the edit state
+                const nameInput = groupDiv.querySelector('.group-name-input');
+                const name = nameInput ? nameInput.value.trim() : '';
+
                 const outputs = [];
-                groupDiv.querySelectorAll('.group-output-checkbox:checked').forEach(checkbox => outputs.push(parseInt(checkbox.value)));
-                if (name && outputs.length > 0) groups[name] = outputs;
+                // Find the checked checkboxes within the edit state
+                groupDiv.querySelectorAll('.group-output-checkbox:checked').forEach(checkbox => {
+                    outputs.push(parseInt(checkbox.value));
+                });
+
+                if (name && outputs.length > 0) {
+                    groups[name] = outputs;
+                }
             });
             return groups;
         }
 
         function getLabelsFromUi() {
             const labels = {};
-            document.querySelectorAll('.i2c-label-input').forEach(input => {
-                const outputId = input.dataset.outputId;
-                const labelText = input.value.trim();
+            document.querySelectorAll('.i2c-label-input').forEach(labelInput => {
+                const labelText = labelInput.value.trim();
+                
+                // Find the parent container of the label input
+                const container = labelInput.parentElement;
+                if (!container) return;
+                
+                // Find the number input field within the same container
+                const numberInput = container.querySelector('input[type="number"]');
+                if (!numberInput) return;
+                
+                // Get the CURRENT value from the number input. This is the correct ID.
+                const outputId = parseInt(numberInput.value, 10);
+
+                // Only save the label if the output ID is valid and the label is not empty
                 if (outputId > 0 && labelText) {
                     labels[outputId] = labelText;
                 }
@@ -697,6 +831,40 @@
             }
         }
 
+        async function scanI2cDevices() {
+            // Note the corrected variable names being passed here
+            setLoadingState(scanI2cButton, scanI2cBtnText, scanI2cSpinner, true);
+            showStatus(`Scanning I2C devices...`, 'loading');
+            statusEl.textContent = 'Scanning...'; // Use the dedicated status element
+            statusEl.style.color = 'orange';
+
+            try {
+                const response = await fetch(`/api/i2c/scan`, {
+                    method: 'POST' // No headers needed for this simple request
+                });
+                if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+                const data = await response.json();
+                
+                // FIX: Use the 'message' field from the JSON, not 'devices'
+                showStatus(data.message, 'success'); 
+                statusEl.textContent = data.message;
+                statusEl.style.color = 'green';
+
+                // Optional: Refresh the page after a successful scan to see new devices
+                setTimeout(() => {
+                    window.location.reload();
+                }, 2000);
+
+            } catch (error) {
+                console.error('I2C scan error:', error);
+                showStatus('Failed to scan I2C devices.', 'error');
+                statusEl.textContent = 'Failed to scan I2C devices.';
+                statusEl.style.color = 'red';
+            } finally {
+                setLoadingState(scanI2cButton, scanI2cBtnText, scanI2cSpinner, false);
+            }
+        }
+               
         async function restartDevice() {
             setLoadingState(restartBtn, restartBtnText, restartSpinner, true);
             showStatus('Sending restart command...', 'loading');
