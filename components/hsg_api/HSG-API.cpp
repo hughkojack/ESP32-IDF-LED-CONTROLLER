@@ -21,6 +21,7 @@
 #include "freertos/event_groups.h"
 #include "lwip/opt.h"
 #include "hardware_config.h"
+#include "can_protocol.h"
 
 static const char* TAG = "HSG-API";
 static const char* NVS_NS = "cfg";
@@ -47,6 +48,9 @@ esp_mqtt_client_handle_t g_mqtt_client = nullptr;
 static std::string g_mqtt_command_topic;
 int g_ws_fd = -1; 
 //static esp_err_t h_websocket(httpd_req_t *req);
+const size_t MAX_CAN_HISTORY = 50; // Store the last 50 messages
+static std::vector<HSG_CanFrame> g_can_history;
+static SemaphoreHandle_t g_history_mutex = nullptr;
 
 // ------------------ small helpers ------------------
 static esp_err_t send_json(httpd_req_t *req, cJSON *root) {
@@ -250,7 +254,7 @@ static esp_err_t h_config_post(httpd_req_t* req) {
     save_cfg_json(full_config_root);
     cJSON_Delete(posted_config);
     cJSON_Delete(full_config_root);
-
+   
     // Reload the output mapping in case it changed
 //    hsg_outputs_reload_config();
 
@@ -327,21 +331,54 @@ static esp_err_t h_command(httpd_req_t* req) {
     return httpd_resp_sendstr(req, "OK");
 }
 
-// GET /api/can/last
-static esp_err_t h_can_last(httpd_req_t *req) {
-    HSG_CanFrame f;
-    if (g_last_mutex) xSemaphoreTake(g_last_mutex, portMAX_DELAY);
-    f = g_last;
-    if (g_last_mutex) xSemaphoreGive(g_last_mutex);
+// GET /api/can/history
+static esp_err_t h_can_history(httpd_req_t *req) {
+    cJSON* root = cJSON_CreateArray(); // Create a JSON array
 
-    cJSON* root = cJSON_CreateObject();
-    cJSON_AddNumberToObject(root, "id", (int)f.id);
-    cJSON_AddNumberToObject(root, "dlc", f.dlc);
-    char hex[3*8+1] = {0}; int p = 0;
-    for (int i = 0; i < f.dlc && i < 8; ++i)
-        p += snprintf(hex + p, sizeof hex - p, "%02X%s", f.data[i], (i+1<f.dlc)?" ":"");
-    cJSON_AddStringToObject(root, "data", hex);
-    return send_json(req, root);
+    if (xSemaphoreTake(g_history_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        for (const auto& f : g_can_history) {
+            cJSON* msg = cJSON_CreateObject();
+            cJSON_AddNumberToObject(msg, "id", f.id);
+            cJSON_AddNumberToObject(msg, "dlc", f.dlc);
+            
+            char hex[24] = {0}; // Format data as a hex string
+            for (int i = 0; i < f.dlc; ++i) {
+                sprintf(hex + (i * 2), "%02X", f.data[i]);
+            }
+            cJSON_AddStringToObject(msg, "data", hex);
+            std::string description = "Unknown Message";
+            CanMessageType msgType = getMessageType(f.id);
+
+            if (static_cast<uint8_t>(msgType) == static_cast<uint8_t>(LIGHTING_COMMAND)) {
+                if (f.dlc >= 2) {
+                    int switchId = getNodeId(f.id);
+                    int button = f.data[0];
+                    const char* action;
+                    if (f.data[1] == 1) {
+                        action = "CLICK";
+                    } else if (f.data[1] == 2) {
+                        action = "HOLD";
+                    } else if (f.data[1] == 3) {
+                        action = "DOUBLE_CLICK"; // Use the same string as in main.cpp
+                    } else {
+                        action = "UNKNOWN";
+                    }
+                    char desc_buffer[100];
+                    snprintf(desc_buffer, sizeof(desc_buffer), "Switch %d, Button %d, Action: %s", switchId, button, action);
+                    description = desc_buffer;
+                }
+            } else if (msgType == HEARTBEAT) {
+                int nodeId = getNodeId(f.id);
+                char desc_buffer[50];
+                snprintf(desc_buffer, sizeof(desc_buffer), "Heartbeat from Node %d", nodeId);
+                description = desc_buffer;
+            }
+            cJSON_AddStringToObject(msg, "description", description.c_str());
+            cJSON_AddItemToArray(root, msg);
+        }
+        xSemaphoreGive(g_history_mutex);
+    }
+    return send_json(req, root); // send_json is already in your code
 }
 
 // POST /api/ota
@@ -478,13 +515,14 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     httpd_uri_t mqtt_get   { .uri="/api/mqtt",     .method=HTTP_GET,   .handler=h_mqtt_get,   .user_ctx=nullptr };
 //    httpd_uri_t mqtt_post  { .uri="/api/mqtt",     .method=HTTP_POST, .handler=h_mqtt_post,  .user_ctx=nullptr };
     httpd_uri_t cmd_post   { .uri="/api/command",  .method=HTTP_POST,  .handler=h_command,    .user_ctx=nullptr };
-    httpd_uri_t can_last   { .uri="/api/can/last", .method=HTTP_GET,   .handler=h_can_last,   .user_ctx=nullptr };
     httpd_uri_t ota_post   { .uri="/api/ota",      .method=HTTP_POST,  .handler=h_ota,        .user_ctx=nullptr };
     httpd_uri_t favicon_get = { .uri="/favicon.ico", .method=HTTP_GET, .handler=h_favicon,    .user_ctx=nullptr };
     httpd_uri_t config_page = { .uri="/config", .method=HTTP_GET, .handler=h_config_page, .user_ctx=nullptr };
     httpd_uri_t state_get = { .uri="/api/state", .method=HTTP_GET, .handler=h_state_get, .user_ctx=nullptr };
     httpd_uri_t i2c_scan_uri = { .uri="/api/i2c/scan", .method=HTTP_POST, .handler=h_i2c_scan, .user_ctx=nullptr };
+    httpd_uri_t can_history = { .uri="/api/can/history", .method=HTTP_GET, .handler=h_can_history, .user_ctx=nullptr };
 
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &can_history));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &i2c_scan_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &state_get));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &config_page));
@@ -495,7 +533,6 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &mqtt_get));
 //  ESP_ERROR_CHECK(httpd_register_uri_handler(server, &mqtt_post));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &cmd_post));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &can_last));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &ota_post));
 
     httpd_uri_t ws = {
@@ -569,6 +606,7 @@ EventGroupHandle_t get_event_group() {
 esp_err_t start(const Init& cfg) {
     g_init = cfg;
     if (!g_last_mutex) g_last_mutex = xSemaphoreCreateMutex();
+    if (!g_history_mutex) g_history_mutex = xSemaphoreCreateMutex();
     if (!g_event_group) g_event_group = xEventGroupCreate(); // Create the event group
 
     // Ensure NVS is ready (idempotent)
@@ -614,11 +652,15 @@ void stop() {
     if (g_last_mutex) { vSemaphoreDelete(g_last_mutex); g_last_mutex = nullptr; }
 }
 
-void update_last_can(const HSG_CanFrame& f) {
-    if (!g_last_mutex) return;
-    xSemaphoreTake(g_last_mutex, portMAX_DELAY);
-    g_last = f;
-    xSemaphoreGive(g_last_mutex);
+void add_to_can_history(const HSG_CanFrame& f) {
+    if (!g_history_mutex) return;
+    if (xSemaphoreTake(g_history_mutex, portMAX_DELAY) == pdTRUE) {
+        g_can_history.insert(g_can_history.begin(), f);
+        if (g_can_history.size() > MAX_CAN_HISTORY) {
+            g_can_history.pop_back();
+        }
+        xSemaphoreGive(g_history_mutex);
+    }
 }
 
 // returns only the "config" object as JSON

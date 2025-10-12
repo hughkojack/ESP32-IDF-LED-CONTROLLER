@@ -63,7 +63,7 @@ i2c_master_bus_handle_t i2c_bus_handle;
 static spi_device_handle_t can_spi_handle;
 static MCP2515* mcp2515_ptr = nullptr;
 static QueueHandle_t gpio_evt_queue = nullptr;
-
+static QueueHandle_t can_message_queue = nullptr;
 
 // --- Application Structs & Data ---
 enum class TargetType { OUTPUT, GROUP };
@@ -77,15 +77,15 @@ struct Command {
 };
 
 struct Binding {
-    int switchId;
-    int button;
+    int switchId = 0;
+    int button = 0;
     std::string onAction;
-    TargetType targetType;
-    int outputId;
+    TargetType targetType = TargetType::OUTPUT;
+    int outputId = 0;
     std::string groupName;
     std::string state;
-    int brightness;
-    int fade_ms;
+    int brightness = -1; // -1 indicates not set
+    int fade_ms = 0;
 };
 
 // A vector to hold all the rules loaded from config
@@ -103,13 +103,15 @@ OutputState outputs[MAX_OUTPUTS];
 //------------------------------------------------------------------------
 int outputBrightness[MAX_OUTPUTS] = {0}; // Last "ON" brightness (0-100)
 static can_frame g_last_frame = {};
-static SemaphoreHandle_t g_last_mutex;
+static SemaphoreHandle_t g_bindings_mutex;
+
 //-----------------------------------------------------------------------
 
 /*--------------------------- Function Declarations ---------------------------*/
 static esp_err_t i2c_master_init(void);
 void main_task(void *pvParameter);
 void animation_task(void *pvParameter);
+void can_processing_task(void *pvParameter);
 static void IRAM_ATTR gpio_isr_handler(void* arg);
 static void wifi_start(void);
 void setOutput(int output, int brightness, int fadeMs);
@@ -168,14 +170,14 @@ void processFades() {
 }
 
 void processCommand(const Command& cmd) {
-    ESP_LOGI(TAG, "Processing command for %s: %s%d, state=%s, brightness=%d, fade=%dms",
-             (cmd.type == TargetType::OUTPUT) ? "output" : "group",
-             (cmd.type == TargetType::OUTPUT) ? "" : cmd.group_name.c_str(),
-             cmd.output_id,
-             cmd.state.c_str(),
-             cmd.brightness,
-             cmd.fade_ms);
-
+    if (cmd.type == TargetType::OUTPUT) {
+        ESP_LOGI(TAG, "Processing command for output: %d, state=%s, brightness=%d, fade=%dms",
+                cmd.output_id, cmd.state.c_str(), cmd.brightness, cmd.fade_ms);
+    } else { // It's a group
+        ESP_LOGI(TAG, "Processing command for group: '%s', state=%s, brightness=%d, fade=%dms",
+                cmd.group_name.c_str(), cmd.state.c_str(), cmd.brightness, cmd.fade_ms);
+    }
+    
     int final_brightness;
     if (cmd.state == "ON") {
         final_brightness = 100;
@@ -234,6 +236,10 @@ void processCommand(const Command& cmd) {
             cJSON_ArrayForEach(output_item, group_outputs) {
                 if (cJSON_IsNumber(output_item)) {
                     int output_id = output_item->valueint;
+                    // --- Debugging ---
+//                    ESP_LOGI(TAG, "  -> Group '%s' is commanding Output: %d", cmd.group_name.c_str(), output_id);
+                    // --- Debugging ---
+
                     setOutput(output_id, final_brightness, cmd.fade_ms);
 
                     // This part is correct: it updates the individual light buttons
@@ -245,8 +251,7 @@ void processCommand(const Command& cmd) {
                     HSG::API::send_ws_message(std::string(json_str));
                     cJSON_Delete(individual_update);
                     free(json_str);
-
-                    vTaskDelay(pdMS_TO_TICKS(200));
+//                    vTaskDelay(pdMS_TO_TICKS(200));
                 }
             }
 
@@ -613,7 +618,7 @@ static esp_err_t can_module_init(void) {
     
     spi_device_interface_config_t can_devcfg = {
         .mode = 0,                         // SPI mode 0
-        .clock_speed_hz = 8 * 1000 * 1000, // Clock speed is 8 MHz
+        .clock_speed_hz = 10 * 1000 * 1000, // Clock speed is 10 MHz
         .spics_io_num = CAN_CS_GPIO,
         .queue_size = 10,                   // We wish to be able to queue 10 transactions at a time
     };
@@ -632,88 +637,57 @@ static esp_err_t can_module_init(void) {
 
 /*--------------------------- Fading and PWM Logic ---------------------------*/
 
-static void load_bindings() {
-    g_bindings.clear();
-    cJSON* config = HSG::API::get_config_json_obj();
-    if (!config) return;
+void reload_bindings() {
+    if (xSemaphoreTake(g_bindings_mutex, portMAX_DELAY) == pdTRUE) {
+        g_bindings.clear();
+        cJSON* config = HSG::API::get_config_json_obj();
+        if (!config) return;
 
-    cJSON* bindings_json = cJSON_GetObjectItem(config, "bindings");
-    if (cJSON_IsArray(bindings_json)) {
-        cJSON* rule_json = NULL;
-        cJSON_ArrayForEach(rule_json, bindings_json) {
-            Binding b;
-            // Parse Trigger
-            cJSON* trigger = cJSON_GetObjectItem(rule_json, "trigger");
-            b.switchId = cJSON_GetObjectItem(trigger, "switchId")->valueint;
-            b.button = cJSON_GetObjectItem(trigger, "button")->valueint;
-            b.onAction = cJSON_GetObjectItem(trigger, "action")->valuestring;
-
-            // Parse Action
-            cJSON* action = cJSON_GetObjectItem(rule_json, "action");
-            if (cJSON_HasObjectItem(action, "output")) {
-                b.targetType = TargetType::OUTPUT;
-                b.outputId = cJSON_GetObjectItem(action, "output")->valueint;
-            } else if (cJSON_HasObjectItem(action, "group")) {
-                b.targetType = TargetType::GROUP;
-                b.groupName = cJSON_GetObjectItem(action, "group")->valuestring;
-            }
-            b.state = cJSON_GetObjectItem(action, "state") ? cJSON_GetObjectItem(action, "state")->valuestring : "";
-            b.brightness = cJSON_GetObjectItem(action, "brightness") ? cJSON_GetObjectItem(action, "brightness")->valueint : -1; // -1 indicates not set
-            b.fade_ms = cJSON_GetObjectItem(action, "fade") ? cJSON_GetObjectItem(action, "fade")->valueint : 0;
-            
-            g_bindings.push_back(b);
+        // --- ADD THIS DIAGNOSTIC BLOCK ---
+    /*    char* json_string = cJSON_Print(config); // cJSON_Print makes it nicely formatted
+        if (json_string) {
+            printf("\n=============== START of Stored bindings.json ===============\n");
+            printf("%s\n", json_string);
+            printf("================ END of Stored bindings.json =================\n\n");
+            free(json_string); // IMPORTANT: Free the memory allocated by cJSON_Print
         }
+        // --- END DIAGNOSTIC BLOCK ---
+    */
+
+        cJSON* bindings_json = cJSON_GetObjectItem(config, "bindings");
+        if (cJSON_IsArray(bindings_json)) {
+            cJSON* rule_json = NULL;
+            cJSON_ArrayForEach(rule_json, bindings_json) {
+                Binding b;
+                // Parse Trigger
+                cJSON* trigger = cJSON_GetObjectItem(rule_json, "trigger");
+                b.switchId = cJSON_GetObjectItem(trigger, "switchId")->valueint;
+                b.button = cJSON_GetObjectItem(trigger, "button")->valueint;
+                b.onAction = cJSON_GetObjectItem(trigger, "action")->valuestring;
+
+                // Parse Action
+                cJSON* action = cJSON_GetObjectItem(rule_json, "action");
+                if (cJSON_HasObjectItem(action, "output")) {
+                    b.targetType = TargetType::OUTPUT;
+                    b.outputId = cJSON_GetObjectItem(action, "output")->valueint;
+                } else if (cJSON_HasObjectItem(action, "group")) {
+                    b.targetType = TargetType::GROUP;
+                    b.groupName = cJSON_GetObjectItem(action, "group")->valuestring;
+                }
+                b.state = cJSON_GetObjectItem(action, "state") ? cJSON_GetObjectItem(action, "state")->valuestring : "";
+                b.brightness = cJSON_GetObjectItem(action, "brightness") ? cJSON_GetObjectItem(action, "brightness")->valueint : -1; // -1 indicates not set
+                b.fade_ms = cJSON_GetObjectItem(action, "fade") ? cJSON_GetObjectItem(action, "fade")->valueint : 0;
+                
+                g_bindings.push_back(b);
+            }
+        }
+        cJSON_Delete(config);
+        ESP_LOGI(TAG, "Loaded %d CAN bindings", g_bindings.size());
+        xSemaphoreGive(g_bindings_mutex);
     }
-    cJSON_Delete(config);
-    ESP_LOGI(TAG, "Loaded %d CAN bindings", g_bindings.size());
 }
 
 
-bool set_mcp2515_normal_mode(spi_device_handle_t spi_handle) {
-    // Write to CANCTRL register to set Normal Mode
-    uint8_t normal_mode_cmd[2] = {0x02, 0x00}; // WRITE CANCTRL, value = 0x00 (Normal Mode)
-    
-    spi_transaction_t t = {
-        .flags = 0,  // Move flags to the correct position
-        .length = 16,
-        .tx_buffer = normal_mode_cmd
-    };
-    
-    esp_err_t ret = spi_device_transmit(spi_handle, &t);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set Normal mode");
-        return false;
-    }
-    
-    vTaskDelay(pdMS_TO_TICKS(100));
-    
-    // Verify we're in Normal Mode
-    uint8_t read_cmd[3] = {0x03, 0x00, 0x00}; // READ CANCTRL
-    uint8_t response[3] = {0};
-    
-    spi_transaction_t t2 = {
-        .flags = 0,
-        .length = 24,
-        .tx_buffer = read_cmd,
-        .rx_buffer = response
-    };
-    
-    spi_device_transmit(spi_handle, &t2);
-    
-    uint8_t canstat = response[2];
-    uint8_t opmode = (canstat >> 5) & 0x07;
-    
-    ESP_LOGI(TAG, "CANCTRL read back: 0x%02x, OPMODE: %d", canstat, opmode);
-    
-    // OPMODE should be 0 (Normal Mode) or 1 (Sleep Mode)
-    if (response[2] == 0x00) {
-        ESP_LOGI(TAG, "MCP2515 successfully in Normal Mode");
-        return true;
-    } else {
-        ESP_LOGE(TAG, "MCP2515 still not in Normal Mode. OPMODE: %d", opmode);
-        return false;
-    }
-}
 
 /*--------------------------- Main Application Entry Point --------------------*/
 extern "C" void app_main(void) {
@@ -752,6 +726,7 @@ extern "C" void app_main(void) {
     api_init.get_outputs_json_cb = [](){
         return get_current_outputs_json();
     };
+    api_init.config_updated_cb = reload_bindings;
 
     HSG::API::start(api_init);
     HSG::API::mqtt_start();
@@ -767,8 +742,12 @@ extern "C" void app_main(void) {
    // HSG::API::scan_and_prune_i2c(I2C_MASTER_NUM);
     cJSON_Delete(initial_config); // Clean up
 
-    // Start Application Tasks
-    xTaskCreate(main_task, "can_task", 4096, NULL, 5, NULL);
+    g_bindings_mutex = xSemaphoreCreateMutex();
+    can_message_queue = xQueueCreate(30, sizeof(can_frame)); // Buffer for 30 CAN frames
+
+    //xTaskCreate(main_task, "can_gateway", 4096, NULL, 15, NULL); // High priority
+    xTaskCreatePinnedToCore(main_task, "can_gateway", 4096, NULL, 15, NULL, 1);
+    xTaskCreate(can_processing_task, "can_logic", 4096, NULL, 5, NULL);
     xTaskCreate(animation_task, "animation_task", 4096, NULL, 5, NULL);
 
     ESP_LOGI(TAG, "app_main() Initialization complete.");    
@@ -795,31 +774,10 @@ bool initialize_mcp2515_with_retry() {
             ESP_LOGW(TAG, "MCP2515 normal mode setting failed on attempt %d", attempt);
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
-        }
-        
-        // Verify we're in normal mode by reading CANSTAT
-        uint8_t read_cmd[3] = {0x03, 0x0E, 0x00}; // READ CANSTAT
-        uint8_t response[3] = {0};
-        
-        spi_transaction_t t = {
-            .flags = 0,
-            .length = 24,
-            .tx_buffer = read_cmd,
-            .rx_buffer = response
-        };
-        
-        if (spi_device_transmit(can_spi_handle, &t) == ESP_OK) {
-            uint8_t canstat = response[2];
-            uint8_t opmode = (canstat >> 5) & 0x07;
-            
-            if (opmode == 0) { // Normal mode
-                ESP_LOGI(TAG, "MCP2515 successfully initialized and in Normal Mode (CANSTAT: 0x%02x)", canstat);
-                return true;
-            } else {
-                ESP_LOGW(TAG, "MCP2515 not in normal mode (OPMODE: %d) on attempt %d", opmode, attempt);
-            }
-        }
-        
+        } else {
+            ESP_LOGI(TAG, "MCP2515 set to Normal Mode successfully");
+            return true;
+        }  
         vTaskDelay(pdMS_TO_TICKS(200));
     }
     
@@ -827,10 +785,117 @@ bool initialize_mcp2515_with_retry() {
     return false;
 }
 
+void can_processing_task(void *pvParameter) {
+    ESP_LOGI(TAG, "CAN Processing Task started.");
+    
+    // Load the bindings once at the start
+    reload_bindings();
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    can_frame frame;
+
+    while (1) {
+        // Process multiple messages in one go if available
+        int messages_processed = 0;
+
+        // 1. Wait here until one message arrives from the gateway task.
+        if (xQueueReceive(can_message_queue, &frame, portMAX_DELAY)) {
+
+            HSG_CanFrame api_frame;
+            api_frame.id = frame.can_id;
+            api_frame.dlc = frame.can_dlc;
+            memcpy(api_frame.data, frame.data, frame.can_dlc);
+            HSG::API::add_to_can_history(api_frame);
+            CanMessageType msgType = getMessageType(frame.can_id);
+            //for debugging
+            printf("Full CAN ID Received: 0x%lX\n", frame.can_id);
+
+            if (msgType == LIGHTING_COMMAND) {
+                if (frame.can_dlc >= 2) {
+                    int switchId = getNodeId(frame.can_id);
+                    int button = frame.data[0];
+                    const char* action;
+                    if (frame.data[1] == 1) {
+                        action = "CLICK";
+                    } else if (frame.data[1] == 2) {
+                        action = "HOLD";
+                    } else if (frame.data[1] == 3) {
+                        action = "DOUBLE_CLICK"; // Or "Double click" - must match your JSON
+                    } else {
+                        action = "UNKNOWN"; // Safely handle any other values
+                    }
+                    bool matchFound = false;
+                    Command cmd;
+
+                    if (xSemaphoreTake(g_bindings_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                        for (const auto& rule : g_bindings) {
+                            if (rule.switchId == switchId && rule.button == button && rule.onAction == action) {
+                                ESP_LOGI(TAG, "CAN Match Found: Switch %d, Button %d", switchId, button);
+                                matchFound = true;
+
+                                cmd.type = rule.targetType;
+                                cmd.output_id = rule.outputId;
+                                cmd.group_name = rule.groupName;
+                                cmd.fade_ms = rule.fade_ms;
+                                cmd.state = rule.state;
+                                cmd.brightness = rule.brightness;
+                                
+                                break; 
+                            }
+                        }
+                        xSemaphoreGive(g_bindings_mutex);
+                    }    
+                    if (matchFound) {
+                        processCommand(cmd);
+                    } else {
+                        ESP_LOGW(TAG, "Received a valid lighting command for Switch ID %d (Button: %d), but NO matching binding was found in the configuration.", switchId, button);
+                    }
+                }
+            } else if (msgType == HEARTBEAT) {
+                uint8_t nodeId = getNodeId(frame.can_id);
+                // Use a more efficient log level for frequent messages
+                ESP_LOGD(TAG, "Heartbeat received from node 0x%02X", nodeId);
+            }
+        }
+    }
+}
+
+void test_can_hardware() {
+    ESP_LOGI(TAG, "=== CAN Hardware Diagnostic ===");
+    
+    // Test SPI communication
+    uint8_t reset_cmd = 0xC0; // Reset command
+    spi_transaction_t t = {
+        .length = 8,
+        .tx_buffer = &reset_cmd
+    };
+    
+    esp_err_t spi_ret = spi_device_transmit(can_spi_handle, &t);
+    ESP_LOGI(TAG, "SPI transmit test: %s", esp_err_to_name(spi_ret));
+    
+    // Test GPIO levels
+    ESP_LOGI(TAG, "CAN_CS level: %d", gpio_get_level((gpio_num_t)CAN_CS_GPIO));
+    ESP_LOGI(TAG, "CAN_INT level: %d", gpio_get_level((gpio_num_t)CAN_INT_GPIO));
+    
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // Try to reset and reconfigure MCP2515
+    if (mcp2515_ptr->reset() == MCP2515::ERROR_OK) {
+        ESP_LOGI(TAG, "MCP2515 reset successful");
+        if (mcp2515_ptr->setBitrate(CAN_500KBPS, MCP_8MHZ) == MCP2515::ERROR_OK) {
+            ESP_LOGI(TAG, "MCP2515 bitrate set successfully");
+            if (mcp2515_ptr->setNormalMode() == MCP2515::ERROR_OK) {
+                ESP_LOGI(TAG, "MCP2515 normal mode set successfully");
+            }
+        }
+    }
+    
+    ESP_LOGI(TAG, "=== End Diagnostic ===");
+}
 /*--------------------------- Main Application Task -------------------------*/
 void main_task(void *pvParameter)
 {
-    ESP_LOGI(TAG, "Main task started.");
+    ESP_LOGI(TAG, "CAN Gateway Task started.");
     
      if (can_module_init() != ESP_OK) {
         ESP_LOGE(TAG, "CAN module initialization failed. Halting task.");
@@ -838,13 +903,10 @@ void main_task(void *pvParameter)
     }
     mcp2515_ptr = new MCP2515(&can_spi_handle);
     
-    // Enhanced initialization with retry logic
     bool can_available = initialize_mcp2515_with_retry();
     
     if (!can_available) {
-        ESP_LOGW(TAG, "MCP2515 not available after retries, running without CAN support.");
-    } else {
-        ESP_LOGI(TAG, "MCP2515 initialized successfully and ready for operation.");
+        ESP_LOGW(TAG, "MCP2515 not available, running without CAN support.");
     }
 
     // GPIO interrupt setup (keep your existing code)
@@ -853,106 +915,40 @@ void main_task(void *pvParameter)
     io_conf.pin_bit_mask = (1ULL << CAN_INT_GPIO);
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     gpio_config(&io_conf);
 
-    gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
-    g_last_mutex = xSemaphoreCreateMutex();
+    gpio_evt_queue = xQueueCreate(30, sizeof(uint32_t));
+    
     ESP_ERROR_CHECK(gpio_isr_handler_add((gpio_num_t)CAN_INT_GPIO, gpio_isr_handler, (void*)CAN_INT_GPIO));
-
-    load_bindings();
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-//    bool can_available = true;
-//    if (mcp2515_ptr == nullptr || mcp2515_ptr->reset() != MCP2515::ERROR_OK) {
-//        ESP_LOGW(TAG, "MCP2515 not detected, running without CAN support.");
-//        can_available = false;
-//    }
-//    test_can_hardware();
 
     while (1) {
         if (can_available) {
+            // Wait for an interrupt signal from the ISR
+            uint32_t io_num;
+            if (xQueueReceive(gpio_evt_queue, &io_num, pdMS_TO_TICKS(1000))) {
+                int messages_processed = 0;
+                can_frame received_frame;
+                do {
+                    if (mcp2515_ptr->readMessage(&received_frame) == MCP2515::ERROR_OK) {
+                        messages_processed++;
+                        if (xQueueSend(can_message_queue, &received_frame, 0) != pdPASS) {
+                            ESP_LOGW(TAG, "CAN processing queue full! Dropped message ID: 0x%lX", received_frame.can_id);
+                        }
+                    } else {
+                        break; // No more messages
+                    }
+                    if (messages_processed >= 10) {
+                        ESP_LOGW(TAG, "Reached safety limit of 10 messages per interrupt");
+                        break;
+                    }
+                } while (true);
+            }
             if (mcp2515_ptr->checkError()) {
                 uint8_t err_flags = mcp2515_ptr->getErrorFlags();
-                // Check for the bus-off flag (TXBO)
-                if (err_flags & MCP2515::EFLG_TXBO) {
-                    ESP_LOGE(TAG, "CAN bus-off error detected! Attempting to reset MCP2515...");
-                    // Attempt to reset the controller to clear the bus-off state
-                    if (mcp2515_ptr->reset() == MCP2515::ERROR_OK) {
-                        // Re-apply the configuration after reset
-                        mcp2515_ptr->setBitrate(CAN_500KBPS, MCP_8MHZ);
-                        mcp2515_ptr->setNormalMode();
-                        ESP_LOGI(TAG, "MCP2515 reset and reconfigured successfully.");
-                    } else {
-                        ESP_LOGE(TAG, "MCP2515 reset failed.");
-                    }
-                } else {
-                    ESP_LOGW(TAG, "CAN error detected (flags: 0x%02X), clearing flags.", err_flags);
-                    mcp2515_ptr->clearRXnOVRFlags();
-                    mcp2515_ptr->clearInterrupts();
-                }
-                // Give the bus a moment to settle after an error
-                vTaskDelay(pdMS_TO_TICKS(1000));
-                continue; // Skip trying to read a message this cycle
-            }
-            // --- Check for CAN messages ---
-            uint32_t io_num;
-            if (xQueueReceive(gpio_evt_queue, &io_num, pdMS_TO_TICKS(5000))) {
-                can_frame can_frame;
-                if (mcp2515_ptr->readMessage(&can_frame) == MCP2515::ERROR_OK) {
-                    ESP_LOGI(TAG, "CAN Frame Received! ID: 0x%lX", can_frame.can_id);
-                    // We need to copy the data to the HSG_CanFrame struct
-                    // 1. Create a temporary frame of the correct API type
-                    HSG_CanFrame api_frame;
-                    api_frame.id = can_frame.can_id;
-                    api_frame.dlc = can_frame.can_dlc;
-                    memcpy(api_frame.data, can_frame.data, can_frame.can_dlc);
-                    // 2. Call the public function to update the API's internal cache
-                    HSG::API::update_last_can(api_frame);
-                    
-                    // --- FIX: Decode the message using the new protocol ---
-                    CanMessageType msgType = getMessageType(can_frame.can_id);
-
-                    // --- NEW: Rule-matching engine ---
-                    // Assume switch sends: [button_num, action_type]
-                    if (msgType == LIGHTING_COMMAND) {
-                        if (can_frame.can_dlc >= 2) {
-                            int switchId = getNodeId(can_frame.can_id);
-                            int button = can_frame.data[0];
-                            const char* action = (can_frame.data[1] == 1) ? "CLICK" : "HOLD"; // Example action mapping
-
-                            // Find a matching rule in our bindings
-                            for (const auto& rule : g_bindings) {
-                                if (rule.switchId == switchId && rule.button == button && rule.onAction == action) {
-                                    ESP_LOGI(TAG, "CAN Match Found: Switch %d, Button %d", switchId, button);
-                                    
-                                    Command cmd;
-                                    cmd.type = rule.targetType;
-                                    cmd.output_id = rule.outputId;
-                                    cmd.group_name = rule.groupName;
-                                    cmd.fade_ms = rule.fade_ms;
-
-                                    // Handle brightness/state
-                                    if (rule.brightness != -1) {
-                                        cmd.brightness = rule.brightness;
-                                    } else if (rule.state == "ON") {
-                                        cmd.brightness = 100;
-                                    } else if (rule.state == "OFF") {
-                                        cmd.brightness = 0;
-                                    }
-                                    // TODO: Add "TOGGLE" logic if needed
-
-                                    processCommand(cmd);
-                                    break; // Stop after finding the first match
-                                }
-                            }
-                        }
-                    }
-                    // You could add else if blocks here to handle SENSOR_DATA or HEARTBEAT
-                    else if (msgType == HEARTBEAT) {
-                        uint8_t nodeId = getNodeId(can_frame.can_id);
-                        ESP_LOGI(TAG, "Heartbeat received from node 0x%02X", nodeId);
-                    }
-                }
+                ESP_LOGW(TAG, "CAN error detected (flags: 0x%02X), clearing flags.", err_flags);
+                mcp2515_ptr->clearRXnOVRFlags();
+                mcp2515_ptr->clearInterrupts();
             }
         }else {
             // If CAN is not available, just delay to avoid a tight loop
@@ -969,9 +965,7 @@ void animation_task(void *pvParameter)
         vTaskDelay(pdMS_TO_TICKS(16)); // ~60Hz loop for smooth fades
     }
 }
-/* ---------------------- Hardware & Network Init (STUBS) ---------------------- */
-// NOTE: You must provide the full implementations for these functions from your repository.
-// The code below are stubs; you need to copy/paste your actual working functions.
+
 
 static void IRAM_ATTR gpio_isr_handler(void* arg) {
     uint32_t gpio_num = (uint32_t) arg;
@@ -990,15 +984,6 @@ static esp_err_t i2c_master_init(void) {
 
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &i2c_bus_handle));
     return ESP_OK;
-}
-
-httpd_handle_t web_start() {
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    httpd_handle_t server = nullptr;
-    if (httpd_start(&server, &config) == ESP_OK) {
-        return server;
-    }
-    return nullptr;
 }
 
 

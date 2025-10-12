@@ -210,25 +210,39 @@
                 </div>
             </div>
             
-            <div id="commandSection" class="config-section hidden bg-gray-800 p-6 rounded-lg shadow-lg">
-                <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">Send Command</h2>
-                <div class="space-y-4">
-                    <div>
-                        <label for="commandTargetInput" class="block text-sm font-medium text-gray-300">Output/Group</label>
-                        <input type="text" id="commandTargetInput" placeholder="e.g., 1 or 'lights'" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <div id="commandSection" class="config-section hidden space-y-8">
+                <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                    <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">Send Command</h2>
+                    <div class="space-y-4">
+                        <div>
+                            <label for="commandTargetInput" class="block text-sm font-medium text-gray-300">Output/Group</label>
+                            <input type="text" id="commandTargetInput" placeholder="e.g., 1 or 'lights'" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        </div>
+                        <div>
+                            <label for="commandValueInput" class="block text-sm font-medium text-gray-300">Value</label>
+                            <input type="text" id="commandValueInput" placeholder="e.g., ON, OFF, 50" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        </div>
+                        <div>
+                            <label for="fadeInput" class="block text-sm font-medium text-gray-300">Fade Delay (ms)</label>
+                            <input type="number" id="fadeInput" placeholder="e.g., 500" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        </div>
+                        <button id="sendCommandBtn" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center">
+                            <span id="sendCommandBtnText">Send Command</span>
+                            <div id="sendCommandSpinner" class="spinner hidden ml-2"></div>
+                        </button>
                     </div>
-                    <div>
-                        <label for="commandValueInput" class="block text-sm font-medium text-gray-300">Value</label>
-                        <input type="text" id="commandValueInput" placeholder="e.g., ON, OFF, 50" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>   
+                <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                    <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">CAN Message History</h2>
+                    <div class="space-y-4">
+                        <div id="canHistoryLog" style="height: 300px; overflow-y: scroll; border: 1px solid #ccc; padding: 5px; margin-top: 10px; font-family: monospace;">
+                            Click 'Refresh' to see the latest CAN messages...
+                        </div>
+                        <button id="refreshCanBtn" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center">
+                            <span id="refreshCanBtnText">Refresh History</span>
+                            <div id="refreshCanSpinner" class="spinner hidden ml-2"></div>
+                        </button>
                     </div>
-                    <div>
-                        <label for="fadeInput" class="block text-sm font-medium text-gray-300">Fade Delay (ms)</label>
-                        <input type="number" id="fadeInput" placeholder="e.g., 500" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                    </div>
-                    <button id="sendCommandBtn" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center">
-                        <span id="sendCommandBtnText">Send Command</span>
-                        <div id="sendCommandSpinner" class="spinner hidden ml-2"></div>
-                    </button>
                 </div>
             </div>
 
@@ -276,628 +290,676 @@
     </div>
 
     <script>
-        // --- Get references to all the important HTML elements ---
-        const navTabs = document.getElementById('navTabs');
-        const mainContent = document.getElementById('mainContent');
-        const statusMessage = document.getElementById('statusMessage');
-        const fwName = document.getElementById('fwName');
-        const fwVersion = document.getElementById('fwVersion');
-        const fwMaker = document.getElementById('fwMaker');
-        const netMode = document.getElementById('netMode');
-        const netIp = document.getElementById('netIp');
-        const netMac = document.getElementById('netMac');
-        const sysHeap = document.getElementById('sysHeap');
-        const sysSketch = document.getElementById('sysSketch');
-        const i2cMapping = document.getElementById('i2cMapping');
-        const groupContainer = document.getElementById('groupContainer');
-        const addGroupBtn = document.getElementById('addGroupBtn');
-        const wifiSsid = document.getElementById('wifiSsid');
-        const wifiPassword = document.getElementById('wifiPassword');
-        const mqttBroker = document.getElementById('mqttBroker');
-        const mqttPort = document.getElementById('mqttPort');
-        const mqttTopicPrefix = document.getElementById('mqttTopicPrefix');
-        const mqttClientId = document.getElementById('mqttClientId');
-        const mqttUsername = document.getElementById('mqttUsername');
-        const mqttPassword = document.getElementById('mqttPassword');
-        const commandTargetInput = document.getElementById('commandTargetInput');
-        const commandValueInput = document.getElementById('commandValueInput');
-        const fadeInput = document.getElementById('fadeInput');
-        const sendCommandBtn = document.getElementById('sendCommandBtn');
-        const sendCommandBtnText = document.getElementById('sendCommandBtnText');
-        const sendCommandSpinner = document.getElementById('sendCommandSpinner');
-        const otaFile = document.getElementById('otaFile');
-        const uploadFwBtn = document.getElementById('uploadFwBtn');
-        const uploadBtnText = document.getElementById('uploadBtnText');
-        const uploadSpinner = document.getElementById('uploadSpinner');
-        const scanI2cBtnText = document.getElementById('scanI2cBtnText');
-        const scanI2cSpinner = document.getElementById('scanI2cSpinner');
-        const scanI2cButton = document.getElementById('scanI2cButton');
-        const statusEl = document.getElementById('scanStatus');
-
-        const restartBtn = document.getElementById('restartBtn');
-        const restartBtnText = document.getElementById('restartBtnText');
-        const restartSpinner = document.getElementById('restartSpinner');
-
-        const bindingsTableBody = document.getElementById('bindingsTableBody');
-        const addBindingBtn = document.getElementById('addBindingBtn');
-        const bindSwitchId = document.getElementById('bindSwitchId');
-        const bindButton = document.getElementById('bindButton');
-        const bindOnAction = document.getElementById('bindOnAction');
-        const bindTarget = document.getElementById('bindTarget');
-        const bindState = document.getElementById('bindState');
-        const bindBrightness = document.getElementById('bindBrightness');
-        const bindFade = document.getElementById('bindFade');
-
-        let currentBindings = [];
-
-        // Reusable HTML template for the save button
-        const saveButtonTemplate = `
-            <div class="mt-8 bg-gray-800 p-6 rounded-lg shadow-lg border-t border-gray-700">
-                <button class="save-button w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center">
-                    <span class="save-button-text">Save All Configurations</span>
-                    <div class="save-button-spinner spinner hidden ml-2"></div>
-                </button>
-            </div>
-        `;
-
-        // --- Event Listeners ---
-        addGroupBtn.addEventListener('click', () => addGroup());
-        sendCommandBtn.addEventListener('click', sendCommand);
-        uploadFwBtn.addEventListener('click', uploadFirmware);
-        scanI2cButton.addEventListener('click', scanI2cDevices);
-        restartBtn.addEventListener('click', restartDevice);
-        navTabs.addEventListener('click', (event) => {
-            if (event.target.classList.contains('tab-button')) {
-                handleTabClick(event.target);
-            }
-        });
-        addBindingBtn.addEventListener('click', addBinding);
-
-        // --- Functions ---
-
-        function handleTabClick(clickedTab) {
-            navTabs.querySelectorAll('.tab-button').forEach(button => button.classList.remove('active'));
-            clickedTab.classList.add('active');
-            const targetId = clickedTab.dataset.target;
-            mainContent.querySelectorAll('.config-section').forEach(section => {
-                section.id === targetId ? section.classList.remove('hidden') : section.classList.add('hidden');
-            });
-        }
-
-        async function fetchData() {
-            showStatus('Connecting to device...', 'loading');
-            mainContent.classList.add('hidden');
-            navTabs.classList.add('hidden');
-            try {
-                const [adoptResponse, configResponse] = await Promise.all([
-                    fetch(`/api/adopt`),
-                    fetch(`/api/config`)
-                ]);
-                if (!adoptResponse.ok || !configResponse.ok) throw new Error(`HTTP error!`);
-                const adoptData = await adoptResponse.json();
-                const configData = await configResponse.json();
-                populateUI({ ...adoptData, config: configData });
-
-                // Add save buttons to the relevant sections
-                document.getElementById('i2cMappingSection').insertAdjacentHTML('beforeend', saveButtonTemplate);
-                document.getElementById('groupConfigSection').insertAdjacentHTML('beforeend', saveButtonTemplate);
-                document.getElementById('networkConfigSection').insertAdjacentHTML('beforeend', saveButtonTemplate);
-                
-                // Add event listeners to ALL the new save buttons
-                document.querySelectorAll('.save-button').forEach(button => {
-                    button.addEventListener('click', saveAllConfigs);
-                });
-
-                showStatus('Successfully connected to device.', 'success');
-                mainContent.classList.remove('hidden');
-                navTabs.classList.remove('hidden');
-                handleTabClick(navTabs.querySelector('.tab-button.active'));
-            } catch (error) {
-                console.error('Fetch error:', error);
-                showStatus(`Failed to connect to device. Check connection and refresh.`, 'error');
-            }
-        }
-
-        function populateUI(data) {
-            // --- Populate Device Info (no changes here) ---
-            fwName.textContent = data.firmware?.name || '-';
-            fwVersion.textContent = data.firmware?.version || 'N/A';
-            fwMaker.textContent = data.firmware?.maker || '-';
-            netMode.textContent = data.network?.mode || '-';
-            netIp.textContent = data.network?.ip || '-';
-            netMac.textContent = data.network?.mac || '-';
-            sysHeap.textContent = data.system?.heapFreeBytes || '-';
-            sysSketch.textContent = data.system?.sketchSpaceUsedBytes || '-';
-
-            // Get the labels from the config
-            const labels = data.config.labels || {};
+        // Wait for the page to fully load before running the script
+        document.addEventListener('DOMContentLoaded', () => {
+            const navTabs = document.getElementById('navTabs');
+            const mainContent = document.getElementById('mainContent');
+            const statusMessage = document.getElementById('statusMessage');
+            const fwName = document.getElementById('fwName');
+            const fwVersion = document.getElementById('fwVersion');
+            const fwMaker = document.getElementById('fwMaker');
+            const netMode = document.getElementById('netMode');
+            const netIp = document.getElementById('netIp');
+            const netMac = document.getElementById('netMac');
+            const sysHeap = document.getElementById('sysHeap');
+            const sysSketch = document.getElementById('sysSketch');
+            const i2cMapping = document.getElementById('i2cMapping');
+            const groupContainer = document.getElementById('groupContainer');
+            const addGroupBtn = document.getElementById('addGroupBtn');
+            const wifiSsid = document.getElementById('wifiSsid');
+            const wifiPassword = document.getElementById('wifiPassword');
+            const mqttBroker = document.getElementById('mqttBroker');
+            const mqttPort = document.getElementById('mqttPort');
+            const mqttTopicPrefix = document.getElementById('mqttTopicPrefix');
+            const mqttClientId = document.getElementById('mqttClientId');
+            const mqttUsername = document.getElementById('mqttUsername');
+            const mqttPassword = document.getElementById('mqttPassword');
+            const commandTargetInput = document.getElementById('commandTargetInput');
+            const commandValueInput = document.getElementById('commandValueInput');
+            const fadeInput = document.getElementById('fadeInput');
+            const sendCommandBtn = document.getElementById('sendCommandBtn');
+            const sendCommandBtnText = document.getElementById('sendCommandBtnText');
+            const sendCommandSpinner = document.getElementById('sendCommandSpinner');
             
-            // --- CORRECTED I2C MAPPING LOGIC ---
-            i2cMapping.innerHTML = ''; // Clear the section first
+            const refreshButton = document.getElementById('refreshCanBtn');
+            const refreshCanBtnText = document.getElementById('refreshCanBtnText');
+            const refreshCanSpinner = document.getElementById('refreshCanSpinner');
 
-            // Check if there is a saved i2c configuration
-            if (data.config && data.config.i2c && data.config.i2c.pca9685 && Object.keys(data.config.i2c.pca9685).length > 0) {
-                
-                // Loop through each saved device in the configuration
-                for (const [hexAddr, mappings] of Object.entries(data.config.i2c.pca9685)) {
-                    const addr = parseInt(hexAddr.substring(2), 16);
-                    
-                    // 1. Create the UI container for this device
-                    const deviceContainer = document.createElement('div');
-                    deviceContainer.innerHTML = `<h3 class="font-bold text-indigo-400 mb-2">PCA9685 at ${hexAddr}</h3>`;
-                    const grid = document.createElement('div');
-                    grid.className = 'grid grid-cols-4 md:grid-cols-8 gap-x-3 gap-y-3';
+            const logContainer = document.getElementById('canHistoryLog');
 
-                    // 2. Create the 16 input fields for this device
-                    for (let i = 0; i < 16; i++) {
-                        // Get the saved logical output number for this channel (or 0 if not set)
-                        const outputNum = Array.isArray(mappings) ? (mappings[i] || 0) : 0;
-                        const labelText = (outputNum > 0 && labels[outputNum]) ? labels[outputNum] : '';
+            const otaFile = document.getElementById('otaFile');
+            const uploadFwBtn = document.getElementById('uploadFwBtn');
+            const uploadBtnText = document.getElementById('uploadBtnText');
+            const uploadSpinner = document.getElementById('uploadSpinner');
+            const scanI2cBtnText = document.getElementById('scanI2cBtnText');
+            const scanI2cSpinner = document.getElementById('scanI2cSpinner');
+            const scanI2cButton = document.getElementById('scanI2cButton');
+            const statusEl = document.getElementById('scanStatus');
 
-                        const inputContainer = document.createElement('div');
-                        inputContainer.className = 'flex flex-col space-y-1';
-                        inputContainer.innerHTML = `
-                            <label for="pca-${addr}-${i}" class="text-xs text-center font-mono">Ch.${i}</label>
-                            <input type="number" id="pca-${addr}-${i}" data-addr="${addr}" data-port="${i}" value="${outputNum}" title="Logical Output Number"
-                                class="w-full text-center bg-gray-700 text-white rounded-md px-1 py-1 text-xs border border-gray-600">
-                            <input type="text" data-output-id="${outputNum}" value="${labelText}" placeholder="Label" title="Custom Label"
-                                class="i2c-label-input w-full text-center bg-gray-700 text-white rounded-md px-1 py-1 text-xs border border-gray-600">
-                        `;
-                        grid.appendChild(inputContainer);
-                    }
-                    deviceContainer.appendChild(grid);
-                    i2cMapping.appendChild(deviceContainer);
-                }
-            } else {
-                // This message is shown if no devices are in the saved config
-                i2cMapping.innerHTML = '<p class="text-gray-400">No configured PCA9685 devices. Use the "Scan for I2C Devices" button in the Advanced tab to detect and add them.</p>';
-            }
+            const restartBtn = document.getElementById('restartBtn');
+            const restartBtnText = document.getElementById('restartBtnText');
+            const restartSpinner = document.getElementById('restartSpinner');
 
-            // --- Populate Network, Groups, and Bindings (no changes here) ---
-            if (data.config) {
-                if (data.config.wifi) {
-                    wifiSsid.value = data.config.wifi.ssid || '';
-                    wifiPassword.value = data.config.wifi.password || '';
-                }
+            const bindingsTableBody = document.getElementById('bindingsTableBody');
+            const addBindingBtn = document.getElementById('addBindingBtn');
+            const bindSwitchId = document.getElementById('bindSwitchId');
+            const bindButton = document.getElementById('bindButton');
+            const bindOnAction = document.getElementById('bindOnAction');
+            const bindTarget = document.getElementById('bindTarget');
+            const bindState = document.getElementById('bindState');
+            const bindBrightness = document.getElementById('bindBrightness');
+            const bindFade = document.getElementById('bindFade');
 
-                if (data.config.mqtt) {
-                    mqttBroker.value = data.config.mqtt.broker || '';
-                    mqttPort.value = data.config.mqtt.port || '';
-                    mqttTopicPrefix.value = data.config.mqtt.topicPrefix || '';
-                    mqttClientId.value = data.config.mqtt.clientId || (data.network?.mac ? data.network.mac.split(':').slice(3).join('').toLowerCase() : '');
-                    mqttUsername.value = data.config.mqtt.username || '';
-                    mqttPassword.value = data.config.mqtt.password || '';
-                }
+            let currentBindings = [];
 
-                groupContainer.innerHTML = '';
-                if (data.config.groups) {
-                    for (const [name, outputs] of Object.entries(data.config.groups)) {
-                        addGroup(name, outputs);
-                    }
-                }
-            }
-
-            if (data.config && data.config.bindings) {
-                currentBindings = data.config.bindings;
-                renderBindingsTable();
-            }
-        }
-        
-        /**
-         * Renders the bindings table from the global currentBindings array
-         */
-        function renderBindingsTable() {
-            bindingsTableBody.innerHTML = ''; // Clear table
-            currentBindings.forEach((binding, index) => {
-                const triggerText = `Switch ${binding.trigger.switchId}, Button ${binding.trigger.button} (${binding.trigger.action})`;
-                let actionText = '';
-                if (binding.action.output) {
-                    actionText = `Output ${binding.action.output}`;
-                } else if (binding.action.group) {
-                    actionText = `Group '${binding.action.group}'`;
-                }
-                actionText += ` -> ${binding.action.state || 'brightness ' + binding.action.brightness}`;
-                const row = document.createElement('tr');
-                row.className = 'border-b border-gray-700';
-                row.innerHTML = `
-                    <td class="px-4 py-3 font-mono">${triggerText}</td>
-                    <td class="px-4 py-3 font-mono">${actionText}</td>
-                    <td class="px-4 py-3 text-right">
-                        <button class="remove-binding-btn text-red-400 hover:text-red-300" data-index="${index}">Remove</button>
-                    </td>
-                `;
-                bindingsTableBody.appendChild(row);
-            });
-
-            // Add event listeners to all new "Remove" buttons
-            document.querySelectorAll('.remove-binding-btn').forEach(button => {
-                button.addEventListener('click', removeBinding);
-            });
-        }
-        
-        function addBinding() {
-            const trigger = {
-                switchId: parseInt(bindSwitchId.value),
-                button: parseInt(bindButton.value),
-                action: bindOnAction.value
-            };
-            const action = {};
-            const target = bindTarget.value.trim();
-            if (!isNaN(parseInt(target))) {
-                action.output = parseInt(target);
-            } else {
-                action.group = target;
-            }
-            if (bindState.value) action.state = bindState.value.trim().toUpperCase();
-            if (bindBrightness.value) action.brightness = parseInt(bindBrightness.value);
-            if (bindFade.value) action.fade = parseInt(bindFade.value);
-            if (!trigger.switchId || !trigger.button || !target) {
-                showStatus('Switch ID, Button, and Target are required.', 'error');
-                return;
-            }
-            currentBindings.push({ trigger, action });
-            renderBindingsTable();
-            // Clear form fields
-            bindSwitchId.value = bindButton.value = bindTarget.value = bindState.value = bindBrightness.value = bindFade.value = '';
-        }
-        
-        function removeBinding(event) {
-            const index = parseInt(event.target.dataset.index);
-            currentBindings.splice(index, 1);
-            renderBindingsTable();
-        }
-
-        function addGroup(name = '', outputs = []) {
-            // Helper function to get a map of all defined labels like {1: "Kitchen", 5: "Porch"}
-            const getLabelsMap = () => {
-                const labels = {};
-                document.querySelectorAll('.i2c-label-input').forEach(input => {
-                    const numberInput = input.parentElement.querySelector('input[type="number"]');
-                    if (numberInput) {
-                        const outputId = parseInt(numberInput.value, 10);
-                        const labelText = input.value.trim();
-                        if (outputId > 0 && labelText) {
-                            labels[outputId] = labelText;
-                        }
-                    }
-                });
-                return labels;
-            };
-
-            // --- Create the main container for this group ---
-            const groupDiv = document.createElement('div');
-            groupDiv.className = 'group-definition-container p-4 border border-gray-700 rounded-lg';
-
-            // --- Create the HTML for both View and Edit states ---
-            const availableOutputs = getAvailableOutputs();
-            const allLabels = getLabelsMap();
-
-            groupDiv.innerHTML = `
-                <div class="group-view-state">
-                    <div class="flex items-center justify-between mb-2">
-                        <h3 class="text-lg font-semibold text-white group-name-display">${name || 'New Group'}</h3>
-                        <div>
-                            <button class="edit-group-btn text-sm bg-gray-600 hover:bg-gray-500 text-white font-bold py-1 px-3 rounded-md transition duration-300">Edit</button>
-                            <button class="remove-group-btn text-sm bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-3 rounded-md transition duration-300">-</button>
-                        </div>
-                    </div>
-                    <div class="selected-channels-list flex flex-wrap gap-2">
-                        </div>
-                </div>
-
-                <div class="group-edit-state hidden">
-                    <div class="flex items-center gap-2 mb-4">
-                        <input type="text" value="${name}" placeholder="Group Name" class="group-name-input w-1/3 bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600">
-                        <button class="done-editing-btn text-sm bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md transition duration-300">Done</button>
-                    </div>
-                    <div class="available-channels-grid grid grid-cols-4 sm:grid-cols-8 md:grid-cols-12 gap-4">
-                        ${availableOutputs.length > 0 ? availableOutputs.map(outputId => {
-                            const isChecked = outputs.includes(outputId);
-                            return `
-                                <label class="group-output-label text-xs" title="${allLabels[outputId] || `Output ${outputId}`}">
-                                    <span>${outputId}</span>
-                                    <input type="checkbox" value="${outputId}" class="group-output-checkbox mt-1" ${isChecked ? 'checked' : ''}>
-                                </label>`;
-                        }).join('') : '<p class="text-sm text-gray-400 col-span-full">No logical outputs defined in I2C Mapping tab.</p>'}
-                    </div>
+            // Reusable HTML template for the save button
+            const saveButtonTemplate = `
+                <div class="mt-8 bg-gray-800 p-6 rounded-lg shadow-lg border-t border-gray-700">
+                    <button class="save-button w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center">
+                        <span class="save-button-text">Save All Configurations</span>
+                        <div class="save-button-spinner spinner hidden ml-2"></div>
+                    </button>
                 </div>
             `;
 
-            // --- Add the new group element to the page ---
-            groupContainer.appendChild(groupDiv);
+            // --- Event Listeners ---
+            addGroupBtn.addEventListener('click', () => addGroup());
+            sendCommandBtn.addEventListener('click', sendCommand);
+            refreshButton.addEventListener('click', refreshCanHistory);
 
-            // --- Get references to the new elements we just created ---
-            const viewState = groupDiv.querySelector('.group-view-state');
-            const editState = groupDiv.querySelector('.group-edit-state');
-            const editBtn = groupDiv.querySelector('.edit-group-btn');
-            const doneBtn = groupDiv.querySelector('.done-editing-btn');
-            const removeBtn = groupDiv.querySelector('.remove-group-btn');
-            const groupNameDisplay = groupDiv.querySelector('.group-name-display');
-            const groupNameInput = groupDiv.querySelector('.group-name-input');
-            const selectedChannelsList = groupDiv.querySelector('.selected-channels-list');
+            uploadFwBtn.addEventListener('click', uploadFirmware);
+            scanI2cButton.addEventListener('click', scanI2cDevices);
+            restartBtn.addEventListener('click', restartDevice);
+            navTabs.addEventListener('click', (event) => {
+                if (event.target.classList.contains('tab-button')) {
+                    handleTabClick(event.target);
+                }
+            });
+            addBindingBtn.addEventListener('click', addBinding);
 
-            // --- Function to update the view state based on what's checked in the edit state ---
-            const updateViewState = () => {
-                const currentName = groupNameInput.value.trim();
-                groupNameDisplay.textContent = currentName || 'New Group';
+            // --- Functions ---
+
+            function handleTabClick(clickedTab) {
+                navTabs.querySelectorAll('.tab-button').forEach(button => button.classList.remove('active'));
+                clickedTab.classList.add('active');
+                const targetId = clickedTab.dataset.target;
+                mainContent.querySelectorAll('.config-section').forEach(section => {
+                    section.id === targetId ? section.classList.remove('hidden') : section.classList.add('hidden');
+                });
+            }
+
+            async function fetchData() {
+                showStatus('Connecting to device...', 'loading');
+                mainContent.classList.add('hidden');
+                navTabs.classList.add('hidden');
+                try {
+                    const [adoptResponse, configResponse] = await Promise.all([
+                        fetch(`/api/adopt`),
+                        fetch(`/api/config`)
+                    ]);
+                    if (!adoptResponse.ok || !configResponse.ok) throw new Error(`HTTP error!`);
+                    const adoptData = await adoptResponse.json();
+                    const configData = await configResponse.json();
+                    populateUI({ ...adoptData, config: configData });
+
+                    // Add save buttons to the relevant sections
+                    document.getElementById('i2cMappingSection').insertAdjacentHTML('beforeend', saveButtonTemplate);
+                    document.getElementById('groupConfigSection').insertAdjacentHTML('beforeend', saveButtonTemplate);
+                    document.getElementById('networkConfigSection').insertAdjacentHTML('beforeend', saveButtonTemplate);
+                    
+                    // Add event listeners to ALL the new save buttons
+                    document.querySelectorAll('.save-button').forEach(button => {
+                        button.addEventListener('click', saveAllConfigs);
+                    });
+
+                    showStatus('Successfully connected to device.', 'success');
+                    mainContent.classList.remove('hidden');
+                    navTabs.classList.remove('hidden');
+                    handleTabClick(navTabs.querySelector('.tab-button.active'));
+                } catch (error) {
+                    console.error('Fetch error:', error);
+                    showStatus(`Failed to connect to device. Check connection and refresh.`, 'error');
+                }
+            }
+
+            function populateUI(data) {
+                // --- Populate Device Info (no changes here) ---
+                fwName.textContent = data.firmware?.name || '-';
+                fwVersion.textContent = data.firmware?.version || 'N/A';
+                fwMaker.textContent = data.firmware?.maker || '-';
+                netMode.textContent = data.network?.mode || '-';
+                netIp.textContent = data.network?.ip || '-';
+                netMac.textContent = data.network?.mac || '-';
+                sysHeap.textContent = data.system?.heapFreeBytes || '-';
+                sysSketch.textContent = data.system?.sketchSpaceUsedBytes || '-';
+
+                // Get the labels from the config
+                const labels = data.config.labels || {};
                 
-                selectedChannelsList.innerHTML = ''; // Clear previous list
-                const labels = getLabelsMap();
-                const checkedBoxes = editState.querySelectorAll('.group-output-checkbox:checked');
-                
-                if (checkedBoxes.length === 0) {
-                    selectedChannelsList.innerHTML = '<p class="text-xs text-gray-500">No outputs selected.</p>';
+                // --- CORRECTED I2C MAPPING LOGIC ---
+                i2cMapping.innerHTML = ''; // Clear the section first
+
+                // Check if there is a saved i2c configuration
+                if (data.config && data.config.i2c && data.config.i2c.pca9685 && Object.keys(data.config.i2c.pca9685).length > 0) {
+                    
+                    // Loop through each saved device in the configuration
+                    for (const [hexAddr, mappings] of Object.entries(data.config.i2c.pca9685)) {
+                        const addr = parseInt(hexAddr.substring(2), 16);
+                        
+                        // 1. Create the UI container for this device
+                        const deviceContainer = document.createElement('div');
+                        deviceContainer.innerHTML = `<h3 class="font-bold text-indigo-400 mb-2">PCA9685 at ${hexAddr}</h3>`;
+                        const grid = document.createElement('div');
+                        grid.className = 'grid grid-cols-4 md:grid-cols-8 gap-x-3 gap-y-3';
+
+                        // 2. Create the 16 input fields for this device
+                        for (let i = 0; i < 16; i++) {
+                            // Get the saved logical output number for this channel (or 0 if not set)
+                            const outputNum = Array.isArray(mappings) ? (mappings[i] || 0) : 0;
+                            const labelText = (outputNum > 0 && labels[outputNum]) ? labels[outputNum] : '';
+
+                            const inputContainer = document.createElement('div');
+                            inputContainer.className = 'flex flex-col space-y-1';
+                            inputContainer.innerHTML = `
+                                <label for="pca-${addr}-${i}" class="text-xs text-center font-mono">Ch.${i}</label>
+                                <input type="number" id="pca-${addr}-${i}" data-addr="${addr}" data-port="${i}" value="${outputNum}" title="Logical Output Number"
+                                    class="w-full text-center bg-gray-700 text-white rounded-md px-1 py-1 text-xs border border-gray-600">
+                                <input type="text" data-output-id="${outputNum}" value="${labelText}" placeholder="Label" title="Custom Label"
+                                    class="i2c-label-input w-full text-center bg-gray-700 text-white rounded-md px-1 py-1 text-xs border border-gray-600">
+                            `;
+                            grid.appendChild(inputContainer);
+                        }
+                        deviceContainer.appendChild(grid);
+                        i2cMapping.appendChild(deviceContainer);
+                    }
+                } else {
+                    // This message is shown if no devices are in the saved config
+                    i2cMapping.innerHTML = '<p class="text-gray-400">No configured PCA9685 devices. Use the "Scan for I2C Devices" button in the Advanced tab to detect and add them.</p>';
+                }
+
+                // --- Populate Network, Groups, and Bindings (no changes here) ---
+                if (data.config) {
+                    if (data.config.wifi) {
+                        wifiSsid.value = data.config.wifi.ssid || '';
+                        wifiPassword.value = data.config.wifi.password || '';
+                    }
+
+                    if (data.config.mqtt) {
+                        mqttBroker.value = data.config.mqtt.broker || '';
+                        mqttPort.value = data.config.mqtt.port || '';
+                        mqttTopicPrefix.value = data.config.mqtt.topicPrefix || '';
+                        mqttClientId.value = data.config.mqtt.clientId || (data.network?.mac ? data.network.mac.split(':').slice(3).join('').toLowerCase() : '');
+                        mqttUsername.value = data.config.mqtt.username || '';
+                        mqttPassword.value = data.config.mqtt.password || '';
+                    }
+
+                    groupContainer.innerHTML = '';
+                    if (data.config.groups) {
+                        for (const [name, outputs] of Object.entries(data.config.groups)) {
+                            addGroup(name, outputs);
+                        }
+                    }
+                }
+
+                if (data.config && data.config.bindings) {
+                    currentBindings = data.config.bindings;
+                    renderBindingsTable();
+                }
+            }
+            
+            /**
+             * Renders the bindings table from the global currentBindings array
+             */
+            function renderBindingsTable() {
+                bindingsTableBody.innerHTML = ''; // Clear table
+                currentBindings.forEach((binding, index) => {
+                    const triggerText = `Switch ${binding.trigger.switchId}, Button ${binding.trigger.button} (${binding.trigger.action})`;
+                    let actionText = '';
+                    if (binding.action.output) {
+                        actionText = `Output ${binding.action.output}`;
+                    } else if (binding.action.group) {
+                        actionText = `Group '${binding.action.group}'`;
+                    }
+                    actionText += ` -> ${binding.action.state || 'brightness ' + binding.action.brightness}`;
+                    const row = document.createElement('tr');
+                    row.className = 'border-b border-gray-700';
+                    row.innerHTML = `
+                        <td class="px-4 py-3 font-mono">${triggerText}</td>
+                        <td class="px-4 py-3 font-mono">${actionText}</td>
+                        <td class="px-4 py-3 text-right">
+                            <button class="remove-binding-btn text-red-400 hover:text-red-300" data-index="${index}">Remove</button>
+                        </td>
+                    `;
+                    bindingsTableBody.appendChild(row);
+                });
+
+                // Add event listeners to all new "Remove" buttons
+                document.querySelectorAll('.remove-binding-btn').forEach(button => {
+                    button.addEventListener('click', removeBinding);
+                });
+            }
+            
+            function addBinding() {
+                const trigger = {
+                    switchId: parseInt(bindSwitchId.value),
+                    button: parseInt(bindButton.value),
+                    action: bindOnAction.value
+                };
+                const action = {};
+                const target = bindTarget.value.trim();
+                if (!isNaN(parseInt(target))) {
+                    action.output = parseInt(target);
+                } else {
+                    action.group = target;
+                }
+                if (bindState.value) action.state = bindState.value.trim().toUpperCase();
+                if (bindBrightness.value) action.brightness = parseInt(bindBrightness.value);
+                if (bindFade.value) action.fade = parseInt(bindFade.value);
+                if (!trigger.switchId || !trigger.button || !target) {
+                    showStatus('Switch ID, Button, and Target are required.', 'error');
                     return;
                 }
-
-                checkedBoxes.forEach(checkbox => {
-                    const outputId = checkbox.value;
-                    const label = labels[outputId] || `Output ${outputId}`;
-                    const pill = document.createElement('span');
-                    pill.className = 'selected-channel-pill';
-                    pill.textContent = `${outputId}: ${label}`;
-                    selectedChannelsList.appendChild(pill);
-                });
-            };
-
-            // --- Wire up the event listeners ---
-            editBtn.addEventListener('click', () => {
-                viewState.classList.add('hidden');
-                editState.classList.remove('hidden');
-            });
-
-            doneBtn.addEventListener('click', () => {
-                editState.classList.add('hidden');
-                viewState.classList.remove('hidden');
-                updateViewState(); // Update the view with the new selections
-            });
-
-            removeBtn.addEventListener('click', () => {
-                // We add a confirmation dialog for safety
-                if (confirm(`Are you sure you want to delete the group "${groupNameDisplay.textContent}"?`)) {
-                    groupDiv.remove();
-                }
-            });
-
-            // --- Set the initial view ---
-            updateViewState();
-
-            // If a new group is added (name is empty), automatically switch to edit mode
-            if (!name) {
-                editBtn.click();
+                currentBindings.push({ trigger, action });
+                renderBindingsTable();
+                // Clear form fields
+                bindSwitchId.value = bindButton.value = bindTarget.value = bindState.value = bindBrightness.value = bindFade.value = '';
             }
-        }        
-        function getAvailableOutputs() {
-            const outputs = new Set();
-            i2cMapping.querySelectorAll('input[type="number"]').forEach(input => {
-                const value = parseInt(input.value);
-                if (!isNaN(value) && value > 0) outputs.add(value);
-            });
-            return Array.from(outputs).sort((a, b) => a - b);
-        }
-
-        async function saveAllConfigs(event) {
-            const clickedButton = event.currentTarget;
-            const textEl = clickedButton.querySelector('.save-button-text');
-            const spinnerEl = clickedButton.querySelector('.save-button-spinner');
-
-            let topicPrefix = mqttTopicPrefix.value.trim();
-            if (topicPrefix && !topicPrefix.endsWith('/')) {
-                topicPrefix += '/';
-            }
-            const configToSave = {
-                wifi: {
-                    ssid: wifiSsid.value.trim(),
-                    password: wifiPassword.value
-                },
-                mqtt: {
-                    broker: mqttBroker.value.trim(),
-                    port: parseInt(mqttPort.value, 10) || 1883,
-                    topicPrefix: topicPrefix,
-                    clientId: mqttClientId.value.trim(),
-                    username: mqttUsername.value.trim(),
-                    password: mqttPassword.value
-                },
-                i2c: getI2cMappingFromUi(),
-                groups: getGroupsFromUi(),
-                labels: getLabelsFromUi(),
-                bindings: currentBindings // Add the current bindings array here
-            };
-
-            setLoadingState(clickedButton, textEl, spinnerEl, true);
-            showStatus('Saving all configurations...', 'loading');
-            try {
-                // We now only need to send ONE request to /api/config
-                const response = await fetch(`/api/config`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(configToSave)
-                });
-
-                if (!response.ok) throw new Error(`HTTP error!`);
-                showStatus('Configurations saved successfully! Restart device to apply network changes.', 'success');
-            } catch (error) {
-                console.error('Save error:', error);
-                showStatus('Failed to save configurations.', 'error');
-            } finally {
-                setLoadingState(clickedButton, textEl, spinnerEl, false);
-            }
-        }
-
-        function getI2cMappingFromUi() {
-            const i2cConfig = { pca9685: {} };
-            i2cMapping.querySelectorAll('input[type="number"]').forEach(input => {
-                const addr = `0x${parseInt(input.dataset.addr).toString(16)}`;
-                const port = parseInt(input.dataset.port);
-                const value = parseInt(input.value) || 0;
-                if (!i2cConfig.pca9685[addr]) i2cConfig.pca9685[addr] = new Array(16).fill(0);
-                i2cConfig.pca9685[addr][port] = value;
-            });
-            return i2cConfig;
-        }
-
-        function getGroupsFromUi() {
-            const groups = {};
-            // Find each group's main container
-            groupContainer.querySelectorAll('.group-definition-container').forEach(groupDiv => {
-                // Find the name from the input field within the edit state
-                const nameInput = groupDiv.querySelector('.group-name-input');
-                const name = nameInput ? nameInput.value.trim() : '';
-
-                const outputs = [];
-                // Find the checked checkboxes within the edit state
-                groupDiv.querySelectorAll('.group-output-checkbox:checked').forEach(checkbox => {
-                    outputs.push(parseInt(checkbox.value));
-                });
-
-                if (name && outputs.length > 0) {
-                    groups[name] = outputs;
-                }
-            });
-            return groups;
-        }
-
-        function getLabelsFromUi() {
-            const labels = {};
-            document.querySelectorAll('.i2c-label-input').forEach(labelInput => {
-                const labelText = labelInput.value.trim();
-                
-                // Find the parent container of the label input
-                const container = labelInput.parentElement;
-                if (!container) return;
-                
-                // Find the number input field within the same container
-                const numberInput = container.querySelector('input[type="number"]');
-                if (!numberInput) return;
-                
-                // Get the CURRENT value from the number input. This is the correct ID.
-                const outputId = parseInt(numberInput.value, 10);
-
-                // Only save the label if the output ID is valid and the label is not empty
-                if (outputId > 0 && labelText) {
-                    labels[outputId] = labelText;
-                }
-            });
-            return labels;
-        }
-
-        async function sendCommand() {
-            const target = commandTargetInput.value.trim();
-            const value = commandValueInput.value.trim();
-            const fadeValue = fadeInput.value.trim();
-            if (!target || !value) return showStatus('Please enter a target and a value.', 'error');
             
-            let command = {};
-            isNaN(parseInt(target, 10)) ? command.group = target : command.output = parseInt(target, 10);
-            isNaN(parseInt(value, 10)) ? command.state = value.toUpperCase() : command.brightness = parseInt(value, 10);
-            if (fadeValue) command.fade = parseInt(fadeValue, 10);
-
-            setLoadingState(sendCommandBtn, sendCommandBtnText, sendCommandSpinner, true);
-            showStatus(`Sending command...`, 'loading');
-            try {
-                const response = await fetch(`/api/command`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(command)
-                });
-                if (!response.ok) throw new Error(`HTTP error!`);
-                showStatus(`Command sent successfully.`, 'success');
-            } catch (error) {
-                console.error('Command error:', error);
-                showStatus('Failed to send command.', 'error');
-            } finally {
-                setLoadingState(sendCommandBtn, sendCommandBtnText, sendCommandSpinner, false);
+            function removeBinding(event) {
+                const index = parseInt(event.target.dataset.index);
+                currentBindings.splice(index, 1);
+                renderBindingsTable();
             }
-        }
 
-        async function uploadFirmware() {
-            const file = otaFile.files[0];
-            if (!file) return showStatus('Please select a firmware (.bin) file.', 'error');
-            setLoadingState(uploadFwBtn, uploadBtnText, uploadSpinner, true);
-            showStatus(`Uploading ${file.name}...This will take a moment.`, 'loading');
-            try {
-                const response = await fetch(`/api/ota`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/octet-stream' },
-                    body: file
+            function addGroup(name = '', outputs = []) {
+                // Helper function to get a map of all defined labels like {1: "Kitchen", 5: "Porch"}
+                const getLabelsMap = () => {
+                    const labels = {};
+                    document.querySelectorAll('.i2c-label-input').forEach(input => {
+                        const numberInput = input.parentElement.querySelector('input[type="number"]');
+                        if (numberInput) {
+                            const outputId = parseInt(numberInput.value, 10);
+                            const labelText = input.value.trim();
+                            if (outputId > 0 && labelText) {
+                                labels[outputId] = labelText;
+                            }
+                        }
+                    });
+                    return labels;
+                };
+
+                // --- Create the main container for this group ---
+                const groupDiv = document.createElement('div');
+                groupDiv.className = 'group-definition-container p-4 border border-gray-700 rounded-lg';
+
+                // --- Create the HTML for both View and Edit states ---
+                const availableOutputs = getAvailableOutputs();
+                const allLabels = getLabelsMap();
+
+                groupDiv.innerHTML = `
+                    <div class="group-view-state">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-lg font-semibold text-white group-name-display">${name || 'New Group'}</h3>
+                            <div>
+                                <button class="edit-group-btn text-sm bg-gray-600 hover:bg-gray-500 text-white font-bold py-1 px-3 rounded-md transition duration-300">Edit</button>
+                                <button class="remove-group-btn text-sm bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-3 rounded-md transition duration-300">-</button>
+                            </div>
+                        </div>
+                        <div class="selected-channels-list flex flex-wrap gap-2">
+                            </div>
+                    </div>
+
+                    <div class="group-edit-state hidden">
+                        <div class="flex items-center gap-2 mb-4">
+                            <input type="text" value="${name}" placeholder="Group Name" class="group-name-input w-1/3 bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600">
+                            <button class="done-editing-btn text-sm bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md transition duration-300">Done</button>
+                        </div>
+                        <div class="available-channels-grid grid grid-cols-4 sm:grid-cols-8 md:grid-cols-12 gap-4">
+                            ${availableOutputs.length > 0 ? availableOutputs.map(outputId => {
+                                const isChecked = outputs.includes(outputId);
+                                return `
+                                    <label class="group-output-label text-xs" title="${allLabels[outputId] || `Output ${outputId}`}">
+                                        <span>${outputId}</span>
+                                        <input type="checkbox" value="${outputId}" class="group-output-checkbox mt-1" ${isChecked ? 'checked' : ''}>
+                                    </label>`;
+                            }).join('') : '<p class="text-sm text-gray-400 col-span-full">No logical outputs defined in I2C Mapping tab.</p>'}
+                        </div>
+                    </div>
+                `;
+
+                // --- Add the new group element to the page ---
+                groupContainer.appendChild(groupDiv);
+
+                // --- Get references to the new elements we just created ---
+                const viewState = groupDiv.querySelector('.group-view-state');
+                const editState = groupDiv.querySelector('.group-edit-state');
+                const editBtn = groupDiv.querySelector('.edit-group-btn');
+                const doneBtn = groupDiv.querySelector('.done-editing-btn');
+                const removeBtn = groupDiv.querySelector('.remove-group-btn');
+                const groupNameDisplay = groupDiv.querySelector('.group-name-display');
+                const groupNameInput = groupDiv.querySelector('.group-name-input');
+                const selectedChannelsList = groupDiv.querySelector('.selected-channels-list');
+
+                // --- Function to update the view state based on what's checked in the edit state ---
+                const updateViewState = () => {
+                    const currentName = groupNameInput.value.trim();
+                    groupNameDisplay.textContent = currentName || 'New Group';
+                    
+                    selectedChannelsList.innerHTML = ''; // Clear previous list
+                    const labels = getLabelsMap();
+                    const checkedBoxes = editState.querySelectorAll('.group-output-checkbox:checked');
+                    
+                    if (checkedBoxes.length === 0) {
+                        selectedChannelsList.innerHTML = '<p class="text-xs text-gray-500">No outputs selected.</p>';
+                        return;
+                    }
+
+                    checkedBoxes.forEach(checkbox => {
+                        const outputId = checkbox.value;
+                        const label = labels[outputId] || `Output ${outputId}`;
+                        const pill = document.createElement('span');
+                        pill.className = 'selected-channel-pill';
+                        pill.textContent = `${outputId}: ${label}`;
+                        selectedChannelsList.appendChild(pill);
+                    });
+                };
+
+                // --- Wire up the event listeners ---
+                editBtn.addEventListener('click', () => {
+                    viewState.classList.add('hidden');
+                    editState.classList.remove('hidden');
                 });
-                if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
-                showStatus('Upload successful! Device will reboot.', 'success');
-            } catch (error) {
-                console.error('Upload error:', error);
-                showStatus('Firmware upload failed. Check console for details.', 'error');
-            } finally {
-                setLoadingState(uploadFwBtn, uploadBtnText, uploadSpinner, false);
+
+                doneBtn.addEventListener('click', () => {
+                    editState.classList.add('hidden');
+                    viewState.classList.remove('hidden');
+                    updateViewState(); // Update the view with the new selections
+                });
+
+                removeBtn.addEventListener('click', () => {
+                    // We add a confirmation dialog for safety
+                    if (confirm(`Are you sure you want to delete the group "${groupNameDisplay.textContent}"?`)) {
+                        groupDiv.remove();
+                    }
+                });
+
+                // --- Set the initial view ---
+                updateViewState();
+
+                // If a new group is added (name is empty), automatically switch to edit mode
+                if (!name) {
+                    editBtn.click();
+                }
+            }        
+            function getAvailableOutputs() {
+                const outputs = new Set();
+                i2cMapping.querySelectorAll('input[type="number"]').forEach(input => {
+                    const value = parseInt(input.value);
+                    if (!isNaN(value) && value > 0) outputs.add(value);
+                });
+                return Array.from(outputs).sort((a, b) => a - b);
             }
-        }
 
-        async function scanI2cDevices() {
-            // Note the corrected variable names being passed here
-            setLoadingState(scanI2cButton, scanI2cBtnText, scanI2cSpinner, true);
-            showStatus(`Scanning I2C devices...`, 'loading');
-            statusEl.textContent = 'Scanning...'; // Use the dedicated status element
-            statusEl.style.color = 'orange';
+            async function saveAllConfigs(event) {
+                const clickedButton = event.currentTarget;
+                const textEl = clickedButton.querySelector('.save-button-text');
+                const spinnerEl = clickedButton.querySelector('.save-button-spinner');
 
-            try {
-                const response = await fetch(`/api/i2c/scan`, {
-                    method: 'POST' // No headers needed for this simple request
+                let topicPrefix = mqttTopicPrefix.value.trim();
+                if (topicPrefix && !topicPrefix.endsWith('/')) {
+                    topicPrefix += '/';
+                }
+                const configToSave = {
+                    wifi: {
+                        ssid: wifiSsid.value.trim(),
+                        password: wifiPassword.value
+                    },
+                    mqtt: {
+                        broker: mqttBroker.value.trim(),
+                        port: parseInt(mqttPort.value, 10) || 1883,
+                        topicPrefix: topicPrefix,
+                        clientId: mqttClientId.value.trim(),
+                        username: mqttUsername.value.trim(),
+                        password: mqttPassword.value
+                    },
+                    i2c: getI2cMappingFromUi(),
+                    groups: getGroupsFromUi(),
+                    labels: getLabelsFromUi(),
+                    bindings: currentBindings // Add the current bindings array here
+                };
+
+                setLoadingState(clickedButton, textEl, spinnerEl, true);
+                showStatus('Saving all configurations...', 'loading');
+                try {
+                    // We now only need to send ONE request to /api/config
+                    const response = await fetch(`/api/config`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(configToSave)
+                    });
+
+                    if (!response.ok) throw new Error(`HTTP error!`);
+                    showStatus('Configurations saved successfully! Restart device to apply network changes.', 'success');
+                } catch (error) {
+                    console.error('Save error:', error);
+                    showStatus('Failed to save configurations.', 'error');
+                } finally {
+                    setLoadingState(clickedButton, textEl, spinnerEl, false);
+                }
+            }
+
+            function getI2cMappingFromUi() {
+                const i2cConfig = { pca9685: {} };
+                i2cMapping.querySelectorAll('input[type="number"]').forEach(input => {
+                    const addr = `0x${parseInt(input.dataset.addr).toString(16)}`;
+                    const port = parseInt(input.dataset.port);
+                    const value = parseInt(input.value) || 0;
+                    if (!i2cConfig.pca9685[addr]) i2cConfig.pca9685[addr] = new Array(16).fill(0);
+                    i2cConfig.pca9685[addr][port] = value;
                 });
-                if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
-                const data = await response.json();
+                return i2cConfig;
+            }
+
+            function getGroupsFromUi() {
+                const groups = {};
+                // Find each group's main container
+                groupContainer.querySelectorAll('.group-definition-container').forEach(groupDiv => {
+                    // Find the name from the input field within the edit state
+                    const nameInput = groupDiv.querySelector('.group-name-input');
+                    const name = nameInput ? nameInput.value.trim() : '';
+
+                    const outputs = [];
+                    // Find the checked checkboxes within the edit state
+                    groupDiv.querySelectorAll('.group-output-checkbox:checked').forEach(checkbox => {
+                        outputs.push(parseInt(checkbox.value));
+                    });
+
+                    if (name && outputs.length > 0) {
+                        groups[name] = outputs;
+                    }
+                });
+                return groups;
+            }
+
+            function getLabelsFromUi() {
+                const labels = {};
+                document.querySelectorAll('.i2c-label-input').forEach(labelInput => {
+                    const labelText = labelInput.value.trim();
+                    
+                    // Find the parent container of the label input
+                    const container = labelInput.parentElement;
+                    if (!container) return;
+                    
+                    // Find the number input field within the same container
+                    const numberInput = container.querySelector('input[type="number"]');
+                    if (!numberInput) return;
+                    
+                    // Get the CURRENT value from the number input. This is the correct ID.
+                    const outputId = parseInt(numberInput.value, 10);
+
+                    // Only save the label if the output ID is valid and the label is not empty
+                    if (outputId > 0 && labelText) {
+                        labels[outputId] = labelText;
+                    }
+                });
+                return labels;
+            }
+
+            async function sendCommand() {
+                const target = commandTargetInput.value.trim();
+                const value = commandValueInput.value.trim();
+                const fadeValue = fadeInput.value.trim();
+                if (!target || !value) return showStatus('Please enter a target and a value.', 'error');
                 
-                // FIX: Use the 'message' field from the JSON, not 'devices'
-                showStatus(data.message, 'success'); 
-                statusEl.textContent = data.message;
-                statusEl.style.color = 'green';
+                let command = {};
+                isNaN(parseInt(target, 10)) ? command.group = target : command.output = parseInt(target, 10);
+                isNaN(parseInt(value, 10)) ? command.state = value.toUpperCase() : command.brightness = parseInt(value, 10);
+                if (fadeValue) command.fade = parseInt(fadeValue, 10);
 
-                // Optional: Refresh the page after a successful scan to see new devices
-                setTimeout(() => {
-                    window.location.reload();
-                }, 2000);
-
-            } catch (error) {
-                console.error('I2C scan error:', error);
-                showStatus('Failed to scan I2C devices.', 'error');
-                statusEl.textContent = 'Failed to scan I2C devices.';
-                statusEl.style.color = 'red';
-            } finally {
-                setLoadingState(scanI2cButton, scanI2cBtnText, scanI2cSpinner, false);
+                setLoadingState(sendCommandBtn, sendCommandBtnText, sendCommandSpinner, true);
+                showStatus(`Sending command...`, 'loading');
+                try {
+                    const response = await fetch(`/api/command`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(command)
+                    });
+                    if (!response.ok) throw new Error(`HTTP error!`);
+                    showStatus(`Command sent successfully.`, 'success');
+                } catch (error) {
+                    console.error('Command error:', error);
+                    showStatus('Failed to send command.', 'error');
+                } finally {
+                    setLoadingState(sendCommandBtn, sendCommandBtnText, sendCommandSpinner, false);
+                }
             }
-        }
-               
-        async function restartDevice() {
-            setLoadingState(restartBtn, restartBtnText, restartSpinner, true);
-            showStatus('Sending restart command...', 'loading');
-            try {
-                const response = await fetch(`/api/command`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ restart: true })
-                });
-                if (!response.ok) throw new Error(`HTTP error!`);
-                showStatus('Restart command sent. Device will reboot.', 'success');
-            } catch (error) {
-                console.error('Restart error:', error);
-                showStatus('Failed to send restart command.', 'error');
-            } finally {
-                setLoadingState(restartBtn, restartBtnText, restartSpinner, false);
-            }
-        }
 
-        function showStatus(message, type) {
-            statusMessage.textContent = message;
-            statusMessage.className = 'mt-8 text-center text-sm '; // Reset classes
-            const typeClasses = { success: 'text-green-400', error: 'text-red-400', loading: 'text-yellow-400' };
-            statusMessage.classList.add(typeClasses[type] || 'text-gray-400');
-        }
-        
-        function setLoadingState(button, textEl, spinnerEl, isLoading) {
-            button.disabled = isLoading;
-            textEl.classList.toggle('hidden', isLoading);
-            spinnerEl.classList.toggle('hidden', !isLoading);
-        }
-        
-        window.onload = fetchData;
+            async function refreshCanHistory() {
+                if (!logContainer) return;
+
+                logContainer.innerHTML = 'Loading...'; // Show a loading message
+
+                try {
+                    // Call the new API endpoint on your ESP32
+                    const response = await fetch('/api/can/history');
+                    if (!response.ok) {
+                        logContainer.innerHTML = 'Error fetching history.';
+                        return;
+                    }
+                    
+                    const history = await response.json();
+
+                    // Clear the container
+                    logContainer.innerHTML = '';
+
+                    if (history.length === 0) {
+                        logContainer.innerHTML = 'No messages in history.';
+                        return;
+                    }
+
+                    // Loop through the messages and add them to the display
+                    history.forEach(msg => {
+                        const p = document.createElement('p');
+                        p.style.margin = '2px';
+                        // Format the message into a readable string
+                        p.textContent = `ID: 0x${msg.id.toString(16).toUpperCase().padStart(3, '0')}, Data: ${msg.data}  -->  ${msg.description}`;
+                        logContainer.appendChild(p);
+                    });
+
+                } catch (error) {
+                    logContainer.innerHTML = 'Failed to connect to the device.';
+                    console.error('Error fetching CAN history:', error);
+                }
+            }
+
+            async function uploadFirmware() {
+                const file = otaFile.files[0];
+                if (!file) return showStatus('Please select a firmware (.bin) file.', 'error');
+                setLoadingState(uploadFwBtn, uploadBtnText, uploadSpinner, true);
+                showStatus(`Uploading ${file.name}...This will take a moment.`, 'loading');
+                try {
+                    const response = await fetch(`/api/ota`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/octet-stream' },
+                        body: file
+                    });
+                    if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+                    showStatus('Upload successful! Device will reboot.', 'success');
+                } catch (error) {
+                    console.error('Upload error:', error);
+                    showStatus('Firmware upload failed. Check console for details.', 'error');
+                } finally {
+                    setLoadingState(uploadFwBtn, uploadBtnText, uploadSpinner, false);
+                }
+            }
+
+            async function scanI2cDevices() {
+                // Note the corrected variable names being passed here
+                setLoadingState(scanI2cButton, scanI2cBtnText, scanI2cSpinner, true);
+                showStatus(`Scanning I2C devices...`, 'loading');
+                statusEl.textContent = 'Scanning...'; // Use the dedicated status element
+                statusEl.style.color = 'orange';
+
+                try {
+                    const response = await fetch(`/api/i2c/scan`, {
+                        method: 'POST' // No headers needed for this simple request
+                    });
+                    if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+                    const data = await response.json();
+                    
+                    // FIX: Use the 'message' field from the JSON, not 'devices'
+                    showStatus(data.message, 'success'); 
+                    statusEl.textContent = data.message;
+                    statusEl.style.color = 'green';
+
+                    // Optional: Refresh the page after a successful scan to see new devices
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 2000);
+
+                } catch (error) {
+                    console.error('I2C scan error:', error);
+                    showStatus('Failed to scan I2C devices.', 'error');
+                    statusEl.textContent = 'Failed to scan I2C devices.';
+                    statusEl.style.color = 'red';
+                } finally {
+                    setLoadingState(scanI2cButton, scanI2cBtnText, scanI2cSpinner, false);
+                }
+            }
+                
+            async function restartDevice() {
+                setLoadingState(restartBtn, restartBtnText, restartSpinner, true);
+                showStatus('Sending restart command...', 'loading');
+                try {
+                    const response = await fetch(`/api/command`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ restart: true })
+                    });
+                    if (!response.ok) throw new Error(`HTTP error!`);
+                    showStatus('Restart command sent. Device will reboot.', 'success');
+                } catch (error) {
+                    console.error('Restart error:', error);
+                    showStatus('Failed to send restart command.', 'error');
+                } finally {
+                    setLoadingState(restartBtn, restartBtnText, restartSpinner, false);
+                }
+            }
+
+            function showStatus(message, type) {
+                statusMessage.textContent = message;
+                statusMessage.className = 'mt-8 text-center text-sm '; // Reset classes
+                const typeClasses = { success: 'text-green-400', error: 'text-red-400', loading: 'text-yellow-400' };
+                statusMessage.classList.add(typeClasses[type] || 'text-gray-400');
+            }
+            
+            function setLoadingState(button, textEl, spinnerEl, isLoading) {
+                button.disabled = isLoading;
+                textEl.classList.toggle('hidden', isLoading);
+                spinnerEl.classList.toggle('hidden', !isLoading);
+            }
+            window.onload = fetchData;
+        });    
     </script>
 </body>
 </html>

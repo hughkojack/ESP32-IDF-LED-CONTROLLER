@@ -49,7 +49,7 @@ esp_err_t mqtt_start();
 void mqtt_stop();
 
 // Update the "last CAN frame" cache (exposed at GET /api/can/last)
-void update_last_can(const HSG_CanFrame& f);
+void add_to_can_history(const HSG_CanFrame& f);
 
 // Accessors for stored JSON config (NVS), useful if app needs them
 // The JSON schema is:
