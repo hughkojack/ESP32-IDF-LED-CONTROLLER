@@ -11,7 +11,8 @@ idf_component_register(
         app_update
         mqtt
         driver
-        esp_netif 
+        esp_netif
+        esp_wifi
 )
 # Embed your HTML file as binary
 target_add_binary_data(${COMPONENT_TARGET} "ESP32-POE.html" TEXT)

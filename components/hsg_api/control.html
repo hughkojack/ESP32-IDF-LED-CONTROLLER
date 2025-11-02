@@ -100,7 +100,8 @@
         const controlContainer = document.getElementById('controlContainer');
         const loadingSpinner = document.getElementById('loadingSpinner');
         const itemStates = {}; // e.g., { 'output_1': false, 'group_Kitchen': false }
-        let fullConfig = {}; 
+        let fullConfig = {};
+        let activeSliderId = null; 
         
         // --- DEBOUNCE HELPER for sliders ---
         let debounceTimer;
@@ -115,7 +116,8 @@
             if (!fullConfig.groups) return;
 
             for (const groupName in fullConfig.groups) {
-                const groupOutputs = fullConfig.groups[groupName] || [];
+                const groupData = fullConfig.groups[groupName];
+                const groupOutputs = groupData.outputs || [];
                 // Group is ON if ANY child output is ON
                 const isGroupOn = groupOutputs.some(outputId => itemStates[`output_${outputId}`]);
                 const groupKey = `group_${groupName}`;
@@ -155,7 +157,9 @@
                         const groupKey = `group_${groupName}`;
                         itemStates[groupKey] = false;
 
-                        const groupOutputs = config.groups[groupName] || [];
+                        const groupData = config.groups[groupName]; 
+                        const groupOutputs = groupData.outputs || []; 
+                        
                         let individualLightsHTML = '';
                         
                         groupOutputs.forEach(outputNum => {
@@ -254,6 +258,9 @@
                     if (percentDisplay) percentDisplay.textContent = `${brightness}%`;
                 });
                 slider.addEventListener('change', () => handleSliderChange(slider)); // Send command on release
+                const sliderId = slider.dataset.id;
+                slider.addEventListener('mousedown', () => activeSliderId = sliderId);
+                slider.addEventListener('touchstart', () => activeSliderId = sliderId);
             });
         }
 
@@ -383,6 +390,13 @@
                 await fetch('/api/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(command) });
             } catch (error) {
                 console.error('Slider command failed:', error);
+            } finally {
+                // Clear the active slider flag after a short delay to allow state to sync
+                setTimeout(() => {
+                    if (activeSliderId === outputId) {
+                        activeSliderId = null;
+                    }
+                }, 500); // 500ms delay
             }
         }, 150); // Debounce by 150ms
 
@@ -395,16 +409,35 @@
             ws.onmessage = (event) => {
                 let msg;
                 try { msg = JSON.parse(event.data); } catch { return; }
-                const isOn = (msg.state === "ON") || (Number(msg.brightness) > 0);
-                if (msg.output !== undefined) {
-                    updateItemAndChildren('output', msg.output, isOn);
-                    updateSliderUI(msg.output, msg.brightness); 
-                }
-                if (msg.group !== undefined) {
-                    updateItemAndChildren('group', msg.group, isOn);
-                    if(fullConfig.groups[msg.group]) {
-                        fullConfig.groups[msg.group].forEach(outId => updateSliderUI(outId, msg.brightness));
+                if (msg.type === 'state' && msg.outputs) {
+                    // Create a set of which outputs are ON in this update
+                    const outputsOnInThisUpdate = new Set(Object.keys(msg.outputs));
+
+                    // First, turn OFF any light that is not in the update message
+                    for (const key in itemStates) {
+                        if (key.startsWith('output_')) {
+                            const outputId = key.split('_')[1];
+                            if (outputId === activeSliderId) {
+                                continue;
+                            }
+                            if (!outputsOnInThisUpdate.has(outputId)) {
+                                // This light should be off
+                                updateItemUI('output', outputId, 0);
+                            }
+                        }
                     }
+                    // Now, update the brightness for all lights that are ON
+                    for (const outputId in msg.outputs) {
+                        if (outputId === activeSliderId) {
+                            continue; // Skips to the next output in the loop
+                        }
+                        const pwmValue = msg.outputs[outputId];
+                        const brightness = Math.round((pwmValue / 4095) * 100);
+                        updateItemUI('output', outputId, brightness);
+                    }
+                    
+                    // After all individual items are updated, always recalculate the group state
+                    recalcGroups();
                 }
             };    
             ws.onclose = () => {

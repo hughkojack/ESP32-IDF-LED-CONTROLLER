@@ -43,6 +43,7 @@ extern "C" {
 #include "HSG-API.h"
 #include "hsg_outputs.h"
 #include "hsg_pca9685.h"
+#include "esp_task_wdt.h"
 //#include "sdkconfig.h"
 
 static const char *TAG = "MAIN";
@@ -114,19 +115,18 @@ void animation_task(void *pvParameter);
 void can_processing_task(void *pvParameter);
 static void IRAM_ATTR gpio_isr_handler(void* arg);
 static void wifi_start(void);
-void setOutput(int output, int brightness, int fadeMs);
+void setOutput(int output, int brightness, int fadeMs, unsigned long startTimeOffset = 0);
 static void w5500_hardware_reset();
 void set_esp32_mac_on_w5500(esp_eth_handle_t eth_handle);
 
 // --- Core Logic ---
-void setOutput(int output, int brightness, int fadeMs) {
+void setOutput(int output, int brightness, int fadeMs, unsigned long startTimeOffset) {
     int outputIndex = output - 1;
     if (outputIndex < 0 || outputIndex >= MAX_OUTPUTS) return;
 
-    // Set up the parameters for the animation engine
     outputs[outputIndex].startPwmValue = outputs[outputIndex].currentPwmValue;
     outputs[outputIndex].targetPwmValue = (int)roundf(brightness / 100.0f * 4095.0f);
-    outputs[outputIndex].fadeStartTime = esp_log_timestamp();
+    outputs[outputIndex].fadeStartTime = esp_log_timestamp() + startTimeOffset;
     outputs[outputIndex].fadeDuration = (fadeMs > 0) ? fadeMs : 1; // Prevent division by zero
 
     // Store the last "ON" brightness for stateful commands
@@ -136,10 +136,17 @@ void setOutput(int output, int brightness, int fadeMs) {
 }
 
 void processFades() {
+    unsigned long now = esp_log_timestamp(); // Get the current time once per loop
+
     for (int i = 0; i < MAX_OUTPUTS; i++) {
         // Check if a fade is active for this output
         if (outputs[i].currentPwmValue != outputs[i].targetPwmValue) {
-            unsigned long elapsedTime = esp_log_timestamp() - outputs[i].fadeStartTime;
+            
+            if (now < outputs[i].fadeStartTime) {
+                continue; // Not time to start, skip to the next output
+            }
+            
+            unsigned long elapsedTime = now - outputs[i].fadeStartTime;
             int newPwmValue;
 
             if (elapsedTime >= outputs[i].fadeDuration) {
@@ -178,41 +185,63 @@ void processCommand(const Command& cmd) {
                 cmd.group_name.c_str(), cmd.state.c_str(), cmd.brightness, cmd.fade_ms);
     }
     
-    int final_brightness;
+    int final_brightness = 0;
     if (cmd.state == "ON") {
         final_brightness = 100;
     } else if (cmd.state == "OFF") {
         final_brightness = 0;
     } else if (cmd.state == "TOGGLE") {
-        // For a group, we can determine the toggle state based on its first member
-        int output_to_check = (cmd.type == TargetType::OUTPUT) ? cmd.output_id : 0;
+        bool should_turn_on = true; // Default action is to turn ON
+
         if (cmd.type == TargetType::GROUP) {
+            // For a group, check all members to see if any are on
             cJSON* config = HSG::API::get_config_json_obj();
             if (config) {
                 cJSON* groups = cJSON_GetObjectItem(config, "groups");
-                cJSON* group_outputs = cJSON_GetObjectItem(groups, cmd.group_name.c_str());
-                if (cJSON_IsArray(group_outputs) && cJSON_GetArraySize(group_outputs) > 0) {
-                    output_to_check = cJSON_GetArrayItem(group_outputs, 0)->valueint;
+                
+                // CORRECTED REFERENCE: Get the group *object* first
+                cJSON* specific_group = cJSON_GetObjectItem(groups, cmd.group_name.c_str());
+                
+                if (cJSON_IsObject(specific_group)) {
+                    // CORRECTED REFERENCE: Get the 'outputs' array from *within* the object
+                    cJSON* group_outputs = cJSON_GetObjectItem(specific_group, "outputs");
+
+                    if (cJSON_IsArray(group_outputs)) {
+                        // Loop through the group to see if any light is on
+                        cJSON* output_item = NULL;
+                        cJSON_ArrayForEach(output_item, group_outputs) {
+                            int output_id_to_check = output_item->valueint;
+                            if (output_id_to_check > 0 && output_id_to_check <= MAX_OUTPUTS) {
+                                // Check the live state of the light
+                                if (outputs[output_id_to_check - 1].targetPwmValue > 0) {
+                                    should_turn_on = false; // Found a light that's on, so our action is to turn OFF
+                                    break; // No need to check further
+                                }
+                            }
+                        }
+                    }
                 }
                 cJSON_Delete(config);
             }
+        } else { // This is a command for a single OUTPUT
+            if (cmd.output_id > 0 && cmd.output_id <= MAX_OUTPUTS) {
+                if (outputs[cmd.output_id - 1].targetPwmValue > 0) {
+                    should_turn_on = false; // The single light is on, so turn it off
+                }
+            }
         }
-        if (output_to_check > 0) {
-            int target_pwm = outputs[output_to_check - 1].targetPwmValue;
-            final_brightness = (target_pwm > 0) ? 0 : 100;
-        } else {
-            final_brightness = 100; // Default to ON if group is empty or invalid
-        }
+
+        // Now, determine the final brightness based on the collective state
+        final_brightness = should_turn_on ? 100 : 0;
     } else {
         // If no state is provided, use the brightness from the command
         final_brightness = cmd.brightness;
-    }
-
+    } 
     ESP_LOGW(TAG, "brightness '%d' ", final_brightness);
 
     if (cmd.type == TargetType::OUTPUT) {
         setOutput(cmd.output_id, final_brightness, cmd.fade_ms);
-
+/*
         cJSON* root = cJSON_CreateObject();
         cJSON_AddStringToObject(root, "type", "state");
         cJSON_AddNumberToObject(root, "output", cmd.output_id);
@@ -221,49 +250,66 @@ void processCommand(const Command& cmd) {
         HSG::API::send_ws_message(std::string(json_str));
         cJSON_Delete(root);
         free(json_str);
-    } else if (cmd.type == TargetType::GROUP) {
+*/
+        } else if (cmd.type == TargetType::GROUP) {
         cJSON* config = HSG::API::get_config_json_obj();
         if (!config) {
             ESP_LOGE(TAG, "Failed to get config to process group command.");
             return;
         }
 
+        int global_stagger_ms = 0;
+        cJSON* settings = cJSON_GetObjectItem(config, "settings");
+        if (settings) {
+            global_stagger_ms = cJSON_GetObjectItem(settings, "groupStaggerMs") ? cJSON_GetObjectItem(settings, "groupStaggerMs")->valueint : 0;
+        }
         cJSON* groups = cJSON_GetObjectItem(config, "groups");
-        cJSON* group_outputs = cJSON_GetObjectItem(groups, cmd.group_name.c_str());
+        cJSON* specific_group = cJSON_GetObjectItem(groups, cmd.group_name.c_str());
 
-        if (cJSON_IsArray(group_outputs)) {
-            cJSON* output_item = NULL;
-            cJSON_ArrayForEach(output_item, group_outputs) {
-                if (cJSON_IsNumber(output_item)) {
-                    int output_id = output_item->valueint;
-                    // --- Debugging ---
-//                    ESP_LOGI(TAG, "  -> Group '%s' is commanding Output: %d", cmd.group_name.c_str(), output_id);
-                    // --- Debugging ---
+//        cJSON* group_outputs = cJSON_GetObjectItem(groups, cmd.group_name.c_str());
 
-                    setOutput(output_id, final_brightness, cmd.fade_ms);
+        if (cJSON_IsObject(specific_group)) {
+            bool stagger_is_enabled = cJSON_IsTrue(cJSON_GetObjectItem(specific_group, "staggerEnabled"));
+            cJSON* group_outputs = cJSON_GetObjectItem(specific_group, "outputs");
 
-                    // This part is correct: it updates the individual light buttons
-                    cJSON* individual_update = cJSON_CreateObject();
-                    cJSON_AddStringToObject(individual_update, "type", "state");
-                    cJSON_AddNumberToObject(individual_update, "output", output_id);
-                    cJSON_AddNumberToObject(individual_update, "brightness", final_brightness);
-                    char* json_str = cJSON_PrintUnformatted(individual_update);
-                    HSG::API::send_ws_message(std::string(json_str));
-                    cJSON_Delete(individual_update);
-                    free(json_str);
-//                    vTaskDelay(pdMS_TO_TICKS(200));
+            if (cJSON_IsArray(group_outputs)) {
+                int channel_index = 0;
+                cJSON* output_item = NULL;
+                cJSON_ArrayForEach(output_item, group_outputs) {
+                    if (cJSON_IsNumber(output_item)) {
+                        int output_id = output_item->valueint;
+                        unsigned long delay_offset = 0;
+
+                        if (stagger_is_enabled && global_stagger_ms > 0) {
+                            delay_offset = channel_index * global_stagger_ms;
+                        }
+                        setOutput(output_id, final_brightness, cmd.fade_ms, delay_offset);
+                        channel_index++;
+/*
+                        // Updates the individual light buttons
+                        cJSON* individual_update = cJSON_CreateObject();
+                        cJSON_AddStringToObject(individual_update, "type", "state");
+                        cJSON_AddNumberToObject(individual_update, "output", output_id);
+                        cJSON_AddNumberToObject(individual_update, "brightness", final_brightness);
+                        char* json_str = cJSON_PrintUnformatted(individual_update);
+                        HSG::API::send_ws_message(std::string(json_str));
+                        cJSON_Delete(individual_update);
+                        free(json_str);
+*/
+                        }
                 }
-            }
-
-            // --- FIX: After the loop, broadcast the update for the group itself ---
-            cJSON* group_update = cJSON_CreateObject();
-            cJSON_AddStringToObject(group_update, "type", "state");
-            cJSON_AddStringToObject(group_update, "group", cmd.group_name.c_str());
-            cJSON_AddNumberToObject(group_update, "brightness", final_brightness);
-            char* json_str_group = cJSON_PrintUnformatted(group_update);
-            HSG::API::send_ws_message(std::string(json_str_group));
-            cJSON_Delete(group_update);
-            free(json_str_group);
+/*
+                // Broadcast the update for the group itself
+                cJSON* group_update = cJSON_CreateObject();
+                cJSON_AddStringToObject(group_update, "type", "state");
+                cJSON_AddStringToObject(group_update, "group", cmd.group_name.c_str());
+                cJSON_AddNumberToObject(group_update, "brightness", final_brightness);
+                char* json_str_group = cJSON_PrintUnformatted(group_update);
+                HSG::API::send_ws_message(std::string(json_str_group));
+                cJSON_Delete(group_update);
+                free(json_str_group);
+*/
+                }    
 
         } else {
             ESP_LOGW(TAG, "Group '%s' not found in configuration.", cmd.group_name.c_str());
@@ -745,12 +791,22 @@ extern "C" void app_main(void) {
     g_bindings_mutex = xSemaphoreCreateMutex();
     can_message_queue = xQueueCreate(30, sizeof(can_frame)); // Buffer for 30 CAN frames
 
+    ESP_LOGI(TAG, "app_main() Initialization complete.");
+    
+    esp_task_wdt_deinit();
+
+    esp_task_wdt_config_t twdt_config = {
+        .timeout_ms = 10000,                // 10-second timeout
+        .idle_core_mask = (1 << 0) | (1 << 1), // Watch idle tasks on both Core 0 and Core 1
+        .trigger_panic = true           // Trigger a panic (reboot) on timeout
+    };
+    ESP_ERROR_CHECK(esp_task_wdt_init(&twdt_config));
+
     //xTaskCreate(main_task, "can_gateway", 4096, NULL, 15, NULL); // High priority
     xTaskCreatePinnedToCore(main_task, "can_gateway", 4096, NULL, 15, NULL, 1);
     xTaskCreate(can_processing_task, "can_logic", 4096, NULL, 5, NULL);
     xTaskCreate(animation_task, "animation_task", 4096, NULL, 5, NULL);
-
-    ESP_LOGI(TAG, "app_main() Initialization complete.");    
+    
 }
 
 bool initialize_mcp2515_with_retry() {
@@ -793,13 +849,16 @@ void can_processing_task(void *pvParameter) {
     vTaskDelay(pdMS_TO_TICKS(100));
 
     can_frame frame;
+    ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
 
     while (1) {
+        ESP_ERROR_CHECK(esp_task_wdt_reset());
+
         // Process multiple messages in one go if available
         int messages_processed = 0;
 
         // 1. Wait here until one message arrives from the gateway task.
-        if (xQueueReceive(can_message_queue, &frame, portMAX_DELAY)) {
+        if (xQueueReceive(can_message_queue, &frame, pdMS_TO_TICKS(5000))) {
 
             HSG_CanFrame api_frame;
             api_frame.id = frame.can_id;
@@ -921,8 +980,11 @@ void main_task(void *pvParameter)
     gpio_evt_queue = xQueueCreate(30, sizeof(uint32_t));
     
     ESP_ERROR_CHECK(gpio_isr_handler_add((gpio_num_t)CAN_INT_GPIO, gpio_isr_handler, (void*)CAN_INT_GPIO));
-
+    ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
     while (1) {
+        // "Pet the dog" at the start of every loop
+        ESP_ERROR_CHECK(esp_task_wdt_reset());
+
         if (can_available) {
             // Wait for an interrupt signal from the ISR
             uint32_t io_num;
@@ -960,8 +1022,43 @@ void main_task(void *pvParameter)
 
 void animation_task(void *pvParameter)
 {
+    uint32_t last_update_time = 0;
+    const uint32_t update_interval_ms = 100; // Send updates to UI 10 times/sec
+    ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
+
     while (1) {
+        ESP_ERROR_CHECK(esp_task_wdt_reset());
         processFades();
+
+        uint32_t now = esp_log_timestamp();
+        if (now - last_update_time >= update_interval_ms) {
+            last_update_time = now;
+
+            // --- NEW: Build and send a single state update ---
+            cJSON* root = cJSON_CreateObject();
+            cJSON_AddStringToObject(root, "type", "state");
+
+            // Create an object to hold the brightness of all "ON" outputs
+            cJSON* outputs_json = cJSON_CreateObject();
+            for (int i = 0; i < MAX_OUTPUTS; i++) {
+                // Only include outputs that have a non-zero brightness
+                if (outputs[i].currentPwmValue != 0 || outputs[i].targetPwmValue != 0) {
+                    char key[5];
+                    snprintf(key, sizeof(key), "%d", i + 1); // Key is the logical output ID
+                    // We send the raw PWM value
+                    cJSON_AddNumberToObject(outputs_json, key, outputs[i].currentPwmValue);
+                }
+            }
+            cJSON_AddItemToObject(root, "outputs", outputs_json);
+
+            char* json_str = cJSON_PrintUnformatted(root);
+            if (json_str) {
+                HSG::API::send_ws_message(std::string(json_str));
+                free(json_str);
+            }
+            cJSON_Delete(root);
+        }
+
         vTaskDelay(pdMS_TO_TICKS(16)); // ~60Hz loop for smooth fades
     }
 }

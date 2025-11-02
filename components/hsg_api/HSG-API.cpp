@@ -13,6 +13,9 @@
 #include "esp_ota_ops.h"
 #include "esp_mac.h"
 #include "esp_event.h"
+#include "esp_system.h"
+#include "esp_timer.h"
+#include "esp_wifi.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "driver/i2c_master.h"
@@ -131,6 +134,40 @@ static std::vector<uint8_t> scan_pca9685_addrs(i2c_port_t port) {
     return found;
 }
 
+// --- Helper function to get a human-readable uptime string ---
+static std::string get_uptime_string() {
+    int64_t uptime_us = esp_timer_get_time(); // Time since boot in microseconds
+    int64_t uptime_s = uptime_us / 1000000;
+
+    int days = uptime_s / (60 * 60 * 24);
+    int hours = (uptime_s % (60 * 60 * 24)) / (60 * 60);
+    int minutes = (uptime_s % (60 * 60)) / 60;
+    int seconds = uptime_s % 60;
+
+    char buf[100];
+    snprintf(buf, sizeof(buf), "%d days, %02d:%02d:%02d", days, hours, minutes, seconds);
+    return std::string(buf);
+}
+
+// --- Helper function to get the last reset reason as a string ---
+static const char* get_reset_reason_string() {
+    esp_reset_reason_t reason = esp_reset_reason();
+    switch (reason) {
+        case ESP_RST_UNKNOWN:   return "Unknown";
+        case ESP_RST_POWERON:   return "Power-on";
+        case ESP_RST_EXT:       return "External Pin";
+        case ESP_RST_SW:        return "Software Reset";
+        case ESP_RST_PANIC:     return "Panic / Exception";
+        case ESP_RST_INT_WDT:   return "Interrupt Watchdog";
+        case ESP_RST_TASK_WDT:  return "Task Watchdog"; // <-- This is the one!
+        case ESP_RST_WDT:       return "Other Watchdog";
+        case ESP_RST_DEEPSLEEP: return "Deep Sleep Wakeup";
+        case ESP_RST_BROWNOUT:  return "Brownout (Voltage Dip)";
+        case ESP_RST_SDIO:      return "SDIO";
+        default:                return "Other";
+    }
+}
+
 // ------------------ HTTP handlers ------------------
 static esp_err_t h_favicon(httpd_req_t* req)
 {
@@ -169,11 +206,20 @@ static esp_err_t h_adopt(httpd_req_t* req) {
     // network
     cJSON* net = cJSON_CreateObject();
     if (auto* def = esp_netif_get_default_netif()) {
+        const char* if_key = esp_netif_get_ifkey(def);
         esp_netif_ip_info_t ip;
         if (esp_netif_get_ip_info(def, &ip) == ESP_OK) {
             char ipstr[16]; 
             snprintf(ipstr, sizeof ipstr, IPSTR, IP2STR(&ip.ip));
             cJSON_AddStringToObject(net, "ip", ipstr);
+            cJSON_AddStringToObject(net, "activeInterface", if_key);
+        }
+        if (strcmp(if_key, "WIFI_STA_DEF") == 0) {
+            wifi_ap_record_t ap_info;
+            if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+                cJSON_AddStringToObject(net, "ssid", (char*)ap_info.ssid);
+                cJSON_AddNumberToObject(net, "rssi", ap_info.rssi); // Signal strength
+            }
         }
     }
     uint8_t mac[6]; 
@@ -188,25 +234,16 @@ static esp_err_t h_adopt(httpd_req_t* req) {
     // system
     cJSON* sys = cJSON_CreateObject();
     cJSON_AddNumberToObject(sys, "heapFreeBytes", esp_get_free_heap_size());
+    cJSON_AddNumberToObject(sys, "heapMinFree", esp_get_minimum_free_heap_size());
     if (auto* running = esp_ota_get_running_partition()) {
         cJSON_AddNumberToObject(sys, "sketchSpaceUsedBytes", running->size);
     }
+    cJSON_AddStringToObject(sys, "uptime", get_uptime_string().c_str());
+    cJSON_AddStringToObject(sys, "lastResetReason", get_reset_reason_string());
+    cJSON_AddBoolToObject(sys, "wsConnected", (g_ws_fd != -1));
+    
     cJSON_AddItemToObject(root, "system", sys);
-/*
-    // i2c scan (only valid PCA9685 addresses)
-    cJSON* i2c = cJSON_CreateObject();
-    cJSON* pca = cJSON_CreateArray();
 
-    // PCA9685 valid range: 0x40–0x47 (7-bit address space)
-    for (uint32_t a = 0x40; a <= 0x47; ++a) {
-        if (i2c_probe(i2c_bus_handle, (uint8_t)a) == ESP_OK) {
-            cJSON_AddItemToArray(pca, cJSON_CreateNumber(a));
-        }
-        vTaskDelay(pdMS_TO_TICKS(2));
-    }
-    cJSON_AddItemToObject(i2c, "pca9685", pca);
-    cJSON_AddItemToObject(root, "i2c", i2c);
-*/
     return send_json(req, root);
 }
 
@@ -622,7 +659,7 @@ esp_err_t start(const Init& cfg) {
     conf.max_uri_handlers = 16;   // more routes
     conf.lru_purge_enable = true;
     conf.server_port = 80;
-//    conf.max_open_sockets = 10; // Or another number higher than the default
+//    conf.max_open_sockets = 10; // by adding this config the web server will stop working.
     conf.stack_size = 8192;
     
     httpd_handle_t server = nullptr;
@@ -631,6 +668,7 @@ esp_err_t start(const Init& cfg) {
         ESP_LOGE(TAG, "HTTP start failed: %s", esp_err_to_name(err));
         return err;
     }
+
     g_http = server;
 
     ESP_ERROR_CHECK(register_uris(server, cfg));

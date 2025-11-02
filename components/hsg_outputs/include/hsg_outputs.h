@@ -12,7 +12,7 @@ esp_err_t hsg_outputs_init(int i2c_port, cJSON* config_json);
 esp_err_t hsg_outputs_reload_config(cJSON* config_json);
 
 // Set a single logical output to brightness/fade
-esp_err_t hsg_outputs_set(int out, int brightness, int fade_ms);
+esp_err_t hsg_outputs_set(int out, int brightness, int fade_ms, unsigned long startTimeOffset = 0);
 
 // Set a group by name ("AA", "BB", etc.)
 //esp_err_t hsg_outputs_set_group(const char* name, const char* state, int fade_ms);

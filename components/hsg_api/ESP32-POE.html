@@ -79,11 +79,18 @@
                         <p><strong>Mode:</strong> <span id="netMode">-</span></p>
                         <p><strong>IP Address:</strong> <span id="netIp">-</span></p>
                         <p><strong>MAC Address:</strong> <span id="netMac">-</span></p>
+                        <p><strong>Active Interface:</strong> <span id="netActiveIf">-</span></p>
+                        <p><strong>SSID:</strong> <span id="netSsid">-</span></p>
+                        <p><strong>Signal Strength:</strong> <span id="netSignal">-</span> dBm</p>
                     </div>
                     <div class="md:col-span-2">
                         <h3 class="font-bold text-indigo-400 mb-2">System</h3>
                         <p><strong>Free Heap:</strong> <span id="sysHeap">-</span> bytes</p>
+                        <p><strong>Minimum Free Heap:</strong> <span id="sysHeapMin">-</span> bytes</p>
                         <p><strong>Sketch Size:</strong> <span id="sysSketch">-</span> bytes</p>
+                        <p><strong>Last Reset Reason:</strong> <span id="sysLastResetReason">-</span></p>
+                        <p><strong>Uptime:</strong> <span id="sysUptime">-</span></p>
+                        <p><strong>WebSocket Connected:</strong> <span id="sysWsConnected">-</span></p>
                     </div>
                 </div>
             </div>
@@ -248,6 +255,16 @@
 
             <div id="advancedSection" class="config-section hidden space-y-8">
                 <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                    <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">Global Settings</h2>
+                    <div class="space-y-4">
+                        <div>
+                            <label for="groupStaggerMs" class="block text-sm font-medium text-gray-300">Group Stagger Delay (ms)</label>
+                            <input type="number" id="groupStaggerMs" placeholder="e.g., 150" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600">
+                            <p class="text-xs text-gray-400 mt-1">The delay between each channel in a group when stagger is enabled. Set to 0 to disable all staggering.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
                     <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">Firmware Update (OTA)</h2>
                     <div class="space-y-4">
                         <div>
@@ -301,8 +318,15 @@
             const netMode = document.getElementById('netMode');
             const netIp = document.getElementById('netIp');
             const netMac = document.getElementById('netMac');
+            const netActiveIf = document.getElementById('netActiveIf');
+            const netSsid = document.getElementById('netSsid');
+            const netSignal = document.getElementById('netSignal');
             const sysHeap = document.getElementById('sysHeap');
+            const sysHeapMin = document.getElementById('sysHeapMin');
             const sysSketch = document.getElementById('sysSketch');
+            const sysUptime = document.getElementById('sysUptime');
+            const sysWsConnected = document.getElementById('sysWsConnected');
+            const sysLastResetReason = document.getElementById('sysLastResetReason');
             const i2cMapping = document.getElementById('i2cMapping');
             const groupContainer = document.getElementById('groupContainer');
             const addGroupBtn = document.getElementById('addGroupBtn');
@@ -423,19 +447,29 @@
             }
 
             function populateUI(data) {
-                // --- Populate Device Info (no changes here) ---
+                // --- Populate Device Info ---
                 fwName.textContent = data.firmware?.name || '-';
                 fwVersion.textContent = data.firmware?.version || 'N/A';
                 fwMaker.textContent = data.firmware?.maker || '-';
                 netMode.textContent = data.network?.mode || '-';
                 netIp.textContent = data.network?.ip || '-';
                 netMac.textContent = data.network?.mac || '-';
+                netActiveIf.textContent = data.network?.activeInterface || '-';
+                netSsid.textContent = data.network?.ssid || '-';
+                netSignal.textContent = data.network?.rssi || '-';
                 sysHeap.textContent = data.system?.heapFreeBytes || '-';
+                sysHeapMin.textContent = data.system?.heapMinFree || '-';
                 sysSketch.textContent = data.system?.sketchSpaceUsedBytes || '-';
+                sysUptime.textContent = data.system?.uptime || '-';
+                sysLastResetReason.textContent = data.system?.lastResetReason || '-';
+                sysWsConnected.textContent = data.system?.wsConnected ? 'Yes' : 'No';
 
                 // Get the labels from the config
                 const labels = data.config.labels || {};
                 
+                const settings = data.config?.settings || {};
+                document.getElementById('groupStaggerMs').value = settings.groupStaggerMs || 0;
+
                 // --- CORRECTED I2C MAPPING LOGIC ---
                 i2cMapping.innerHTML = ''; // Clear the section first
 
@@ -494,9 +528,9 @@
                     }
 
                     groupContainer.innerHTML = '';
-                    if (data.config.groups) {
-                        for (const [name, outputs] of Object.entries(data.config.groups)) {
-                            addGroup(name, outputs);
+                    if (data.config && data.config.groups) {
+                        for (const [name, groupData] of Object.entries(data.config.groups)) {
+                            addGroup(name, groupData);
                         }
                     }
                 }
@@ -571,8 +605,8 @@
                 renderBindingsTable();
             }
 
-            function addGroup(name = '', outputs = []) {
-                // Helper function to get a map of all defined labels like {1: "Kitchen", 5: "Porch"}
+            function addGroup(name = '', groupData = { outputs: [], staggerEnabled: false }) {
+                const { outputs = [], staggerEnabled = false } = groupData;
                 const getLabelsMap = () => {
                     const labels = {};
                     document.querySelectorAll('.i2c-label-input').forEach(input => {
@@ -610,8 +644,12 @@
                     </div>
 
                     <div class="group-edit-state hidden">
-                        <div class="flex items-center gap-2 mb-4">
+                        <div class="flex items-center gap-4 mb-4">
                             <input type="text" value="${name}" placeholder="Group Name" class="group-name-input w-1/3 bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600">
+                            <label class="flex items-center text-sm">
+                                <input type="checkbox" class="stagger-enabled-checkbox w-4 h-4 text-indigo-600 bg-gray-700 border-gray-600 rounded" ${staggerEnabled ? 'checked' : ''}>
+                                <span class="ml-2 text-gray-300">Enable Stagger Effect</span>
+                            </label>
                             <button class="done-editing-btn text-sm bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md transition duration-300">Done</button>
                         </div>
                         <div class="available-channels-grid grid grid-cols-4 sm:grid-cols-8 md:grid-cols-12 gap-4">
@@ -710,6 +748,9 @@
                     topicPrefix += '/';
                 }
                 const configToSave = {
+                    settings: {
+                        groupStaggerMs: parseInt(document.getElementById('groupStaggerMs').value, 10) || 0
+                    },
                     wifi: {
                         ssid: wifiSsid.value.trim(),
                         password: wifiPassword.value
@@ -773,9 +814,14 @@
                     groupDiv.querySelectorAll('.group-output-checkbox:checked').forEach(checkbox => {
                         outputs.push(parseInt(checkbox.value));
                     });
-
+                    const staggerCheckbox = groupDiv.querySelector('.stagger-enabled-checkbox');
+                    const staggerEnabled = staggerCheckbox ? staggerCheckbox.checked : false;
+    
                     if (name && outputs.length > 0) {
-                        groups[name] = outputs;
+                        groups[name] = {
+                            outputs: outputs,
+                            staggerEnabled: staggerEnabled
+                        };
                     }
                 });
                 return groups;
