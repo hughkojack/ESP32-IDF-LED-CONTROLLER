@@ -144,6 +144,8 @@ This implementation creates a seamless and intuitive user experience, ensuring t
 ## 📡 CAN Protocol
 
 The LED Controller communicates with wall switch nodes using a structured 11-bit CAN protocol.
+## 🏗 System Architecture
+Wall Switch Nodes → CAN Bus → LED Controller Hub → LED Outputs
 
 👉 Full protocol documentation:
 [CAN Protocol Specification](docs/CAN_PROTOCOL.md)
