@@ -96,13 +96,17 @@ See: CAN_PROTOCOL_V2.md
 Example:
 
 ### PRESS
+```
 ID:  (0x1<<7) | nodeId
 DLC: 2
 DATA: input_id, 0x01
+```
 ### LEVEL
+```
 ID:  (0x1<<7) | nodeId
 DLC: 3
 DATA: input_id, 0x03, value
+```
 
 ## 6️⃣ Design Rules
 
@@ -117,6 +121,7 @@ Nodes must:
 * Only report input state changes
 
 ## 🏗 Architecture Philosophy
+```
 Input Hardware
      ↓
 Node Firmware (Normalize Input)
@@ -126,6 +131,8 @@ CAN INPUT_EVENT
 Hub (Interpret + Execute)
      ↓
 Lighting Outputs
+```
+
 ## 🚀 Scalability
 
 This model supports future expansion:
