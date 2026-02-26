@@ -5,6 +5,7 @@ sdkconfig.old
 sdkconfig.defaults.old
 
 # IDE / editor files
+.pio/
 .vscode/
 *.code-workspace
 
