@@ -1,4 +1,4 @@
-# Install script for directory: C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/__pio_env
+# Install script for directory: C:/Users/Hugh/.platformio/packages/framework-espidf/components/__pio_env
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

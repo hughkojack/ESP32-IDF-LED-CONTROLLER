@@ -390,18 +390,26 @@ static esp_err_t h_can_history(httpd_req_t *req) {
                 if (f.dlc >= 2) {
                     int switchId = getNodeId(f.id);
                     int button = f.data[0];
-                    const char* action;
-                    if (f.data[1] == 1) {
-                        action = "CLICK";
-                    } else if (f.data[1] == 2) {
-                        action = "HOLD";
-                    } else if (f.data[1] == 3) {
-                        action = "DOUBLE_CLICK"; // Use the same string as in main.cpp
-                    } else {
-                        action = "UNKNOWN";
+                    uint8_t evt  = f.data[1];
+
+                    const char* action = "UNKNOWN";
+                    if (evt == 0x01) {
+                        action = "PRESS";
+                    } else if (evt == 0x02) {
+                        action = "RELEASE";
+                    } else if (evt == 0x03) {
+                        if (f.dlc >= 3) action = f.data[2] ? "LEVEL_ON" : "LEVEL_OFF";
+                        else action = "LEVEL";
                     }
-                    char desc_buffer[100];
-                    snprintf(desc_buffer, sizeof(desc_buffer), "Switch %d, Button %d, Action: %s", switchId, button, action);
+        
+                    char desc_buffer[120];
+                    if (evt == 0x03 && f.dlc >= 3) {
+                        snprintf(desc_buffer, sizeof(desc_buffer),
+                            "Switch %d, Button %d, Event: %s", switchId, button, action);
+                    } else {
+                        snprintf(desc_buffer, sizeof(desc_buffer),
+                            "Switch %d, Button %d, Event: %s", switchId, button, action);
+                    }
                     description = desc_buffer;
                 }
             } else if (msgType == HEARTBEAT) {

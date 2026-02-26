@@ -1,4 +1,4 @@
-# Install script for directory: C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/esp_rom
+# Install script for directory: C:/Users/Hugh/.platformio/packages/framework-espidf/components/esp_rom
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

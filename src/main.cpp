@@ -186,7 +186,11 @@ void processCommand(const Command& cmd) {
     }
     
     int final_brightness = 0;
-    if (cmd.state == "ON") {
+    // If brightness is explicitly provided, it wins
+    if (cmd.brightness >= 0) {
+        final_brightness = cmd.brightness;
+    }
+    else if (cmd.state == "ON") {
         final_brightness = 100;
     } else if (cmd.state == "OFF") {
         final_brightness = 0;
@@ -234,10 +238,13 @@ void processCommand(const Command& cmd) {
         // Now, determine the final brightness based on the collective state
         final_brightness = should_turn_on ? 100 : 0;
     } else {
-        // If no state is provided, use the brightness from the command
-        final_brightness = cmd.brightness;
-    } 
-    ESP_LOGW(TAG, "brightness '%d' ", final_brightness);
+        // Nothing provided (shouldn't happen)
+        final_brightness = 0;
+    }
+    ESP_LOGI(TAG, "Final brightness=%d", final_brightness);
+    
+    if (final_brightness < 0) final_brightness = 0;
+    if (final_brightness > 100) final_brightness = 100; 
 
     if (cmd.type == TargetType::OUTPUT) {
         setOutput(cmd.output_id, final_brightness, cmd.fade_ms);
@@ -873,22 +880,28 @@ void can_processing_task(void *pvParameter) {
                 if (frame.can_dlc >= 2) {
                     int switchId = getNodeId(frame.can_id);
                     int button = frame.data[0];
-                    const char* action;
-                    if (frame.data[1] == 1) {
-                        action = "CLICK";
-                    } else if (frame.data[1] == 2) {
-                        action = "HOLD";
-                    } else if (frame.data[1] == 3) {
-                        action = "DOUBLE_CLICK"; // Or "Double click" - must match your JSON
-                    } else {
-                        action = "UNKNOWN"; // Safely handle any other values
+
+                    uint8_t evt = frame.data[1];
+                    const char* action = "UNKNOWN";
+
+                    // PRESS / RELEASE / LEVEL(+value)
+                    if (evt == 0x01) {
+                        action = "PRESS";
+                    } else if (evt == 0x02) {
+                        action = "RELEASE";
+                    } else if (evt == 0x03) {
+                        if (frame.can_dlc >= 3) {
+                            action = frame.data[2] ? "LEVEL_ON" : "LEVEL_OFF";
+                        } else {
+                            action = "LEVEL"; // (shouldn't happen, but safe)
+                        }
                     }
                     bool matchFound = false;
                     Command cmd;
 
                     if (xSemaphoreTake(g_bindings_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
                         for (const auto& rule : g_bindings) {
-                            if (rule.switchId == switchId && rule.button == button && rule.onAction == action) {
+                            if (rule.switchId == switchId && rule.button == button && strcmp(rule.onAction.c_str(), action) == 0) {
                                 ESP_LOGI(TAG, "CAN Match Found: Switch %d, Button %d", switchId, button);
                                 matchFound = true;
 

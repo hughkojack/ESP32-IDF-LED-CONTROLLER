@@ -1,6 +1,6 @@
 
-option(BOARD_OLIMEX_POE "Build for Olimex ESP32-POE board" OFF)
-option(BOARD_RACK32 "Build for Rack32 board with W5500" ON)
+option(BOARD_OLIMEX_POE "Build for Olimex ESP32-POE board" ON)
+option(BOARD_RACK32 "Build for Rack32 board with W5500" OFF)
 
 message(STATUS "Board configuration: RACK32=${BOARD_RACK32}, OLIMEX_POE=${BOARD_OLIMEX_POE}")
 

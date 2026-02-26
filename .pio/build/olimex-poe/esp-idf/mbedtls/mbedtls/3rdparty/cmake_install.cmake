@@ -1,4 +1,4 @@
-# Install script for directory: C:/Users/Hugh/.platformio/packages/framework-espidf@3.40405.230623/components/mbedtls/mbedtls/3rdparty
+# Install script for directory: C:/Users/Hugh/.platformio/packages/framework-espidf/components/mbedtls/mbedtls/3rdparty
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -30,5 +30,12 @@ endif()
 # Is this installation the result of a crosscompile?
 if(NOT DEFINED CMAKE_CROSSCOMPILING)
   set(CMAKE_CROSSCOMPILING "TRUE")
+endif()
+
+if(NOT CMAKE_INSTALL_LOCAL_ONLY)
+  # Include the install script for each subdirectory.
+  include("C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/mbedtls/mbedtls/3rdparty/everest/cmake_install.cmake")
+  include("C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/mbedtls/mbedtls/3rdparty/p256-m/cmake_install.cmake")
+
 endif()
 
