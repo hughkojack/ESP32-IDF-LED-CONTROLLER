@@ -140,3 +140,12 @@ Key Features:
 - Individual Control: Inside each group, every light has its own power toggle icon, a descriptive label, and a "glowing track" slider for fine-grained brightness control (0-100%).
 
 This implementation creates a seamless and intuitive user experience, ensuring the web interface is always a perfect, real-time mirror of the lighting system's actual state.
+
+## 📡 CAN Protocol
+
+The LED Controller communicates with wall switch nodes using a structured 11-bit CAN protocol.
+## 🏗 System Architecture
+Wall Switch Nodes → CAN Bus → LED Controller Hub → LED Outputs
+
+👉 Full protocol documentation:
+[CAN Protocol Specification](docs/CAN_PROTOCOL.md)
