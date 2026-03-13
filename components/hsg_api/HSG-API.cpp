@@ -110,6 +110,8 @@ static void ensure_layout(cJSON* root) {
     if (!groups) cJSON_AddItemToObject(config, "groups", groups = cJSON_CreateObject());
     cJSON* mqtt = cJSON_GetObjectItem(config, "mqtt");
     if (!mqtt) cJSON_AddItemToObject(config, "mqtt", mqtt = cJSON_CreateObject());
+    cJSON* nodes = cJSON_GetObjectItem(config, "nodes");
+    if (!nodes) cJSON_AddItemToObject(config, "nodes", nodes = cJSON_CreateArray());
 }
 
 // Probe an I2C address using the ESP-IDF v5+ I²C master API
@@ -276,8 +278,10 @@ static esp_err_t h_config_post(httpd_req_t* req) {
     cJSON* config_obj = cJSON_GetObjectItem(full_config_root, "config");
 
     // This loop iterates through all the keys in the posted JSON
-    // (wifi, mqtt, i2c, groups) and updates them in the main config.
+    // (wifi, mqtt, i2c, groups, etc.) and updates them in the main config.
+    // Skip "nodes" — we set it from the live node list below so config save never overwrites with stale client data.
     for (cJSON* new_section = posted_config->child; new_section != NULL; new_section = new_section->next) {
+        if (strcmp(new_section->string, "nodes") == 0) continue;
         // Remove the old section if it exists
         if (cJSON_HasObjectItem(config_obj, new_section->string)) {
             cJSON_DeleteItemFromObject(config_obj, new_section->string);
@@ -285,6 +289,21 @@ static esp_err_t h_config_post(httpd_req_t* req) {
         // Add the new (or updated) section
         cJSON_AddItemToObject(config_obj, new_section->string, cJSON_Duplicate(new_section, 1));
         ESP_LOGI(TAG, "Updated config section: %s", new_section->string);
+    }
+
+    // Persist the live node list (from g_nodes) so we never overwrite with stale client snapshot
+    if (g_init.get_nodes_json_for_config_save_cb) {
+        cJSON* nodes_to_save = g_init.get_nodes_json_for_config_save_cb();
+        if (nodes_to_save) {
+            cJSON_DeleteItemFromObject(config_obj, "nodes");
+            cJSON_AddItemToObject(config_obj, "nodes", nodes_to_save);
+        }
+    } else if (g_init.get_nodes_json_cb) {
+        cJSON* live_nodes = g_init.get_nodes_json_cb();
+        if (live_nodes) {
+            cJSON_DeleteItemFromObject(config_obj, "nodes");
+            cJSON_AddItemToObject(config_obj, "nodes", live_nodes);
+        }
     }
 
     // Save the newly merged configuration back to NVS
@@ -368,6 +387,163 @@ static esp_err_t h_command(httpd_req_t* req) {
     return httpd_resp_sendstr(req, "OK");
 }
 
+// POST /api/node/config - send hub->node config (set node ID, find-me, etc.)
+// Body: { "target_node_id": 127|1..126, "command": "set_node_id"|"find_me"|"set_find_me_output"|..., ...params }
+static esp_err_t h_node_config_post(httpd_req_t* req) {
+    if (!g_init.send_node_config_cb) {
+        return httpd_resp_send_err(req, HTTPD_501_METHOD_NOT_IMPLEMENTED, "send_node_config_cb not set");
+    }
+    auto body = req_read_all(req);
+    cJSON* root = cJSON_Parse(body.c_str());
+    if (!root) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+
+    int target = NODE_ID_UNCONFIGURED;
+    if (auto* t = cJSON_GetObjectItem(root, "target_node_id"); cJSON_IsNumber(t))
+        target = t->valueint;
+    if (target < 0 || target > 127) {
+        cJSON_Delete(root);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "target_node_id 0..127");
+    }
+    uint8_t target_node_id = (uint8_t)target;
+
+    const char* cmd_str = nullptr;
+    if (auto* c = cJSON_GetObjectItem(root, "command"); cJSON_IsString(c))
+        cmd_str = c->valuestring;
+    if (!cmd_str) {
+        cJSON_Delete(root);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "command required");
+    }
+
+    uint8_t payload[8];
+    size_t plen = 0;
+    uint8_t cmd_byte = 0;
+
+    if (strcmp(cmd_str, "set_node_id") == 0) {
+        cmd_byte = CMD_SET_NODE_ID;
+        if (auto* v = cJSON_GetObjectItem(root, "new_id"); cJSON_IsNumber(v) && v->valueint >= 1 && v->valueint <= 126) {
+            payload[0] = (uint8_t)v->valueint;
+            plen = 1;
+        } else {
+            cJSON_Delete(root);
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "new_id 1..126 required");
+        }
+    } else if (strcmp(cmd_str, "find_me") == 0) {
+        cmd_byte = CMD_FIND_ME;
+        int dur = 5;
+        if (auto* v = cJSON_GetObjectItem(root, "duration_min"); cJSON_IsNumber(v)) dur = v->valueint;
+        if (dur < 1) dur = 1;
+        if (dur > 30) dur = 30;
+        payload[0] = (uint8_t)dur;
+        plen = 1;
+    } else if (strcmp(cmd_str, "set_find_me_output") == 0) {
+        cmd_byte = CMD_SET_FIND_ME_OUTPUT;
+        if (auto* v = cJSON_GetObjectItem(root, "output_index"); cJSON_IsNumber(v)) {
+            payload[0] = (uint8_t)(v->valueint & 0xFF);
+            plen = 1;
+        } else {
+            cJSON_Delete(root);
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "output_index required");
+        }
+    } else if (strcmp(cmd_str, "set_input_count") == 0) {
+        cmd_byte = CMD_SET_INPUT_COUNT;
+        if (auto* v = cJSON_GetObjectItem(root, "count"); cJSON_IsNumber(v) && v->valueint >= 1 && v->valueint <= 6) {
+            payload[0] = (uint8_t)v->valueint;
+            plen = 1;
+        } else {
+            cJSON_Delete(root);
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "count 1..6 required");
+        }
+    } else if (strcmp(cmd_str, "set_input_cfg") == 0) {
+        cmd_byte = CMD_SET_INPUT_CFG;
+        auto* idx = cJSON_GetObjectItem(root, "input_index");
+        auto* id = cJSON_GetObjectItem(root, "input_id");
+        auto* mode = cJSON_GetObjectItem(root, "mode");
+        int mode_val = -1;
+        if (cJSON_IsNumber(mode))
+            mode_val = (mode->valueint & 1);
+        else if (cJSON_IsString(mode)) {
+            if (strcmp(mode->valuestring, "momentary") == 0) mode_val = 0;
+            else if (strcmp(mode->valuestring, "toggle") == 0) mode_val = 1;
+        }
+        if (cJSON_IsNumber(idx) && cJSON_IsNumber(id) && idx->valueint >= 0 && idx->valueint < 6 && mode_val >= 0) {
+            payload[0] = (uint8_t)idx->valueint;
+            payload[1] = (uint8_t)(id->valueint & 0xFF);
+            payload[2] = (uint8_t)mode_val;
+            plen = 3;
+            auto* gpio_item = cJSON_GetObjectItem(root, "gpio");
+            if (cJSON_IsNumber(gpio_item) && ((gpio_item->valueint >= 0 && gpio_item->valueint <= 48) || gpio_item->valueint == 255)) {
+                payload[3] = (uint8_t)(gpio_item->valueint & 0xFF);
+                plen = 4;
+            }
+        } else {
+            cJSON_Delete(root);
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "input_index 0..5, input_id, mode (0/1 or momentary/toggle) required");
+        }
+        // Optional label: update hub state and send CMD_SET_INPUT_LABEL to node
+        if (g_init.set_node_input_label_cb) {
+            const char* label_str = nullptr;
+            if (auto* lab = cJSON_GetObjectItem(root, "label"); cJSON_IsString(lab) && lab->valuestring)
+                label_str = lab->valuestring;
+            g_init.set_node_input_label_cb(target_node_id, (uint8_t)idx->valueint, label_str ? label_str : "");
+        }
+    } else if (strcmp(cmd_str, "set_timing") == 0) {
+        cmd_byte = CMD_SET_TIMING;
+        int click_max = 500, dbl_gap = 400, hold_min = 800, long_hold = 2000;
+        if (auto* v = cJSON_GetObjectItem(root, "click_max_ms"); cJSON_IsNumber(v)) click_max = v->valueint;
+        if (auto* v = cJSON_GetObjectItem(root, "double_click_gap_ms"); cJSON_IsNumber(v)) dbl_gap = v->valueint;
+        if (auto* v = cJSON_GetObjectItem(root, "hold_min_ms"); cJSON_IsNumber(v)) hold_min = v->valueint;
+        if (auto* v = cJSON_GetObjectItem(root, "long_hold_min_ms"); cJSON_IsNumber(v)) long_hold = v->valueint;
+        if (click_max < 0) click_max = 0;
+        if (click_max > 65535) click_max = 65535;
+        if (dbl_gap < 0) dbl_gap = 0;
+        if (dbl_gap > 65535) dbl_gap = 65535;
+        if (hold_min < 0) hold_min = 0;
+        if (hold_min > 65535) hold_min = 65535;
+        if (long_hold < 0) long_hold = 0;
+        if (long_hold > 255) long_hold = 255;  // CAN frame limited to 8 bytes; long_hold sent as 1 byte
+        uint16_t c = (uint16_t)click_max, g = (uint16_t)dbl_gap, h = (uint16_t)hold_min;
+        payload[0] = (uint8_t)(c & 0xFF);
+        payload[1] = (uint8_t)(c >> 8);
+        payload[2] = (uint8_t)(g & 0xFF);
+        payload[3] = (uint8_t)(g >> 8);
+        payload[4] = (uint8_t)(h & 0xFF);
+        payload[5] = (uint8_t)(h >> 8);
+        payload[6] = (uint8_t)long_hold;
+        plen = 7;
+    } else if (strcmp(cmd_str, "reboot") == 0) {
+        cmd_byte = CMD_REBOOT;
+        plen = 0;
+    } else {
+        cJSON_Delete(root);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unknown command");
+    }
+
+    cJSON_Delete(root);
+    g_init.send_node_config_cb(target_node_id, cmd_byte, payload, plen);
+    return httpd_resp_sendstr(req, "OK");
+}
+
+// POST /api/node/remove - remove a node from the hub list (e.g. offline/stale). Body: { "node_id": 1..127 }
+static esp_err_t h_node_remove_post(httpd_req_t* req) {
+    if (!g_init.remove_node_cb) {
+        return httpd_resp_send_err(req, HTTPD_501_METHOD_NOT_IMPLEMENTED, "remove_node_cb not set");
+    }
+    auto body = req_read_all(req);
+    cJSON* root = cJSON_Parse(body.c_str());
+    if (!root) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    int node_id = -1;
+    if (auto* n = cJSON_GetObjectItem(root, "node_id"); cJSON_IsNumber(n))
+        node_id = n->valueint;
+    cJSON_Delete(root);
+    if (node_id < 1 || node_id > 127) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "node_id 1..127 required");
+    }
+    if (!g_init.remove_node_cb((uint8_t)node_id)) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "node not in list");
+    }
+    return httpd_resp_sendstr(req, "OK");
+}
+
 // GET /api/can/history
 static esp_err_t h_can_history(httpd_req_t *req) {
     cJSON* root = cJSON_CreateArray(); // Create a JSON array
@@ -384,23 +560,23 @@ static esp_err_t h_can_history(httpd_req_t *req) {
             }
             cJSON_AddStringToObject(msg, "data", hex);
             std::string description = "Unknown Message";
-            CanMessageType msgType = getMessageType(f.id);
+            if (!isStandardDataFrame(f.id)) {
+                description = "Non-standard CAN frame (EFF/RTR/ERR) ignored by protocol";
+                cJSON_AddStringToObject(msg, "description", description.c_str());
+                cJSON_AddItemToArray(root, msg);
+                continue;
+            }
+
+            const uint16_t sid = getStandardId(f.id);
+            CanMessageType msgType = getMessageType(sid);
 
             if (static_cast<uint8_t>(msgType) == static_cast<uint8_t>(LIGHTING_COMMAND)) {
                 if (f.dlc >= 2) {
-                    int switchId = getNodeId(f.id);
+                    int switchId = getNodeId(sid);
                     int button = f.data[0];
                     uint8_t evt  = f.data[1];
 
-                    const char* action = "UNKNOWN";
-                    if (evt == 0x01) {
-                        action = "PRESS";
-                    } else if (evt == 0x02) {
-                        action = "RELEASE";
-                    } else if (evt == 0x03) {
-                        if (f.dlc >= 3) action = f.data[2] ? "LEVEL_ON" : "LEVEL_OFF";
-                        else action = "LEVEL";
-                    }
+                    const char* action = decodeEventAction(evt);
         
                     char desc_buffer[120];
                     if (evt == 0x03 && f.dlc >= 3) {
@@ -413,7 +589,7 @@ static esp_err_t h_can_history(httpd_req_t *req) {
                     description = desc_buffer;
                 }
             } else if (msgType == HEARTBEAT) {
-                int nodeId = getNodeId(f.id);
+                int nodeId = getNodeId(sid);
                 char desc_buffer[50];
                 snprintf(desc_buffer, sizeof(desc_buffer), "Heartbeat from Node %d", nodeId);
                 description = desc_buffer;
@@ -424,6 +600,19 @@ static esp_err_t h_can_history(httpd_req_t *req) {
         xSemaphoreGive(g_history_mutex);
     }
     return send_json(req, root); // send_json is already in your code
+}
+
+// GET /api/nodes
+static esp_err_t h_nodes_get(httpd_req_t* req) {
+    if (!g_init.get_nodes_json_cb) {
+        return httpd_resp_send_err(req, HTTPD_501_METHOD_NOT_IMPLEMENTED, "get_nodes_json_cb not set");
+    }
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache, no-store, must-revalidate");
+    cJSON* nodes_array = g_init.get_nodes_json_cb();
+    if (!nodes_array) {
+        nodes_array = cJSON_CreateArray(); // Return empty array if callback fails
+    }
+    return send_json(req, nodes_array);
 }
 
 // POST /api/ota
@@ -566,8 +755,14 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     httpd_uri_t state_get = { .uri="/api/state", .method=HTTP_GET, .handler=h_state_get, .user_ctx=nullptr };
     httpd_uri_t i2c_scan_uri = { .uri="/api/i2c/scan", .method=HTTP_POST, .handler=h_i2c_scan, .user_ctx=nullptr };
     httpd_uri_t can_history = { .uri="/api/can/history", .method=HTTP_GET, .handler=h_can_history, .user_ctx=nullptr };
+    httpd_uri_t nodes_get = { .uri="/api/nodes", .method=HTTP_GET, .handler=h_nodes_get, .user_ctx=nullptr };
+    httpd_uri_t node_config_post = { .uri="/api/node/config", .method=HTTP_POST, .handler=h_node_config_post, .user_ctx=nullptr };
+    httpd_uri_t node_remove_post = { .uri="/api/node/remove", .method=HTTP_POST, .handler=h_node_remove_post, .user_ctx=nullptr };
 
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &node_remove_post));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &node_config_post));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &can_history));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &nodes_get));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &i2c_scan_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &state_get));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &config_page));

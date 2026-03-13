@@ -35,6 +35,18 @@ struct Init {
     // NEW: Callback to notify main that config has been updated
     std::function<void()> config_updated_cb;
     std::function<cJSON*()> get_outputs_json_cb;
+    // Callback to get nodes list (returns JSON array of nodes; may merge config + live for display)
+    std::function<cJSON*()> get_nodes_json_cb;
+    // When saving config (POST /api/config), use this if set to avoid re-persisting removed nodes from stale config. Returns g_nodes only.
+    std::function<cJSON*()> get_nodes_json_for_config_save_cb;
+
+    // Send node config over CAN (hub -> node). target_node_id 1..126 or NODE_ID_UNCONFIGURED (127).
+    // cmd = CMD_SET_NODE_ID etc., data/len = payload after cmd byte (can be null/0).
+    std::function<void(uint8_t target_node_id, uint8_t cmd, const uint8_t* data, size_t len)> send_node_config_cb;
+    // Remove a node from the hub list (e.g. offline/stale). node_id 1..126 or 127. Returns true if removed.
+    std::function<bool(uint8_t node_id)> remove_node_cb;
+    // Set per-input label for a node (hub stores, persists, and sends CMD_SET_INPUT_LABEL to node). label can be empty.
+    std::function<void(uint8_t node_id, uint8_t input_index, const char* label)> set_node_input_label_cb;
 };
 
 esp_err_t register_uris(httpd_handle_t server, const Init& init);

@@ -4,6 +4,10 @@ Protocol Version: 2.0
 Applies To: ESP32-IDF-LED-CONTROLLER (Hub) and all Node devices
 Frame Type: Standard 11-bit CAN (Classic CAN, not CAN-FD)
 
+> DEPRECATED (repo configuration): the current hub firmware in this repo is configured for
+> **event-based input** (CLICK/HOLD/etc) as specified in `docs/CAN_PROTOCOL.md`.
+> This V2/raw-state document is retained for reference only.
+
 🧱 Design Philosophy
 
 Protocol V2 is designed to be:
@@ -122,6 +126,10 @@ HOLD threshold	800 ms
 DOUBLE click window	350 ms
 
 All nodes behave consistently because gesture detection occurs in one place.
+
+> Implementation note (this repo): the current hub firmware primarily uses the raw events
+> (`PRESS`, `RELEASE`, `LEVEL` -> `LEVEL_ON`/`LEVEL_OFF`) directly for bindings, as exposed
+> in the web UI. Full CLICK/HOLD/DOUBLE_CLICK gesture synthesis may be added later.
 
 LEVEL Handling
 

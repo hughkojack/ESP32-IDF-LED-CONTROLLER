@@ -43,6 +43,82 @@
         .group-output-checkbox {
             transform: scale(1.2);
         }
+        /* Brightness sliders: filled part (left of knob) = light glowing green; glow only on left */
+        .brightness-slider-wrap {
+            position: relative;
+            display: flex;
+            align-items: center;
+            width: 100%;
+            overflow: visible;
+        }
+        .brightness-slider-track {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            height: 8px;
+            margin: auto 0;
+            background: #4b5563;
+            border-radius: 9999px;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .brightness-slider-fill {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            height: 8px;
+            margin: auto 0;
+            background: #4ade80;
+            border-radius: 9999px;
+            pointer-events: none;
+            z-index: 1;
+            overflow: visible;
+        }
+        .brightness-slider-glow {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            height: 8px;
+            margin: auto 0;
+            background: transparent;
+            box-shadow: 0 0 12px 4px rgba(74, 222, 128, 0.6);
+            border-radius: 9999px;
+            pointer-events: none;
+            z-index: 3;
+            overflow: visible;
+        }
+        input.brightness-slider {
+            position: relative;
+            z-index: 2;
+            -webkit-appearance: none;
+            appearance: none;
+            background: transparent;
+            border-radius: 9999px;
+            flex: 1;
+        }
+        input.brightness-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #e5e7eb;
+            cursor: pointer;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        input.brightness-slider::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #e5e7eb;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-200 font-sans antialiased">
@@ -53,14 +129,15 @@
             <p class="text-gray-400 mt-2">A web interface to configure your ESP32-POE device.</p>
         </header>
 
-        <div id="navTabs" class="hidden mb-8 flex flex-wrap items-center justify-center gap-2 bg-gray-800 p-2 rounded-lg">
-            <button class="tab-button active py-2 px-4 rounded-md text-sm font-medium" data-target="deviceInfoSection">Device Info</button>
-            <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="i2cMappingSection">I2C Mapping</button>
-            <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="groupConfigSection">Groups</button>
-            <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="bindingsSection">CAN Bindings</button>
-            <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="networkConfigSection">Network</button>
-            <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="commandSection">Command</button>
-            <button class="tab-button py-2 px-4 rounded-md text-sm font-medium" data-target="advancedSection">Advanced</button>
+        <div id="navTabs" class="hidden mb-8 flex flex-nowrap items-center gap-1 overflow-x-auto bg-gray-800 p-2 rounded-lg">
+            <button class="tab-button active flex-shrink-0 py-2 px-3 rounded-md text-sm font-medium" data-target="deviceInfoSection">Device Info</button>
+            <button class="tab-button flex-shrink-0 py-2 px-3 rounded-md text-sm font-medium" data-target="i2cMappingSection">I2C Mapping</button>
+            <button class="tab-button flex-shrink-0 py-2 px-3 rounded-md text-sm font-medium" data-target="groupConfigSection">Groups</button>
+            <button class="tab-button flex-shrink-0 py-2 px-3 rounded-md text-sm font-medium" data-target="bindingsSection">CAN Bindings</button>
+            <button class="tab-button flex-shrink-0 py-2 px-3 rounded-md text-sm font-medium" data-target="nodesSection">Nodes</button>
+            <button class="tab-button flex-shrink-0 py-2 px-3 rounded-md text-sm font-medium" data-target="networkConfigSection">Network</button>
+            <button class="tab-button flex-shrink-0 py-2 px-3 rounded-md text-sm font-medium" data-target="commandSection">Command</button>
+            <button class="tab-button flex-shrink-0 py-2 px-3 rounded-md text-sm font-medium" data-target="advancedSection">Advanced</button>
         </div>
 
         <main id="mainContent" class="hidden space-y-8">
@@ -111,6 +188,13 @@
             <div id="bindingsSection" class="config-section hidden bg-gray-800 p-6 rounded-lg shadow-lg">
                 <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">CAN Switch Bindings</h2>
                 <p class="text-sm text-gray-400 mb-6">Map a specific CAN switch button press to an action on an output or group.</p>
+                <p class="text-xs text-gray-400 mb-2">Templates (pre-fill state, then add binding):</p>
+                <div class="flex flex-wrap gap-2 mb-4">
+                    <button type="button" class="bind-template-btn text-xs bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded" data-state="ON" data-brightness="">ON</button>
+                    <button type="button" class="bind-template-btn text-xs bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded" data-state="OFF" data-brightness="">OFF</button>
+                    <button type="button" class="bind-template-btn text-xs bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded" data-state="TOGGLE" data-brightness="">TOGGLE</button>
+                    <button type="button" class="bind-template-btn text-xs bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded" data-state="ON" data-brightness="50">Dim 50%</button>
+                </div>
                 <div class="overflow-x-auto">
                     <table class="min-w-full text-sm text-left">
                         <thead class="bg-gray-700 text-xs text-gray-300 uppercase">
@@ -124,50 +208,188 @@
                         </tbody>
                     </table> 
                 </div>    
-                <div class="mt-8 border-t border-gray-700 pt-6">
+                <button id="addBindingBtn" type="button" class="mt-6 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md transition duration-300">Add New Binding</button>
+            </div>
+
+            <div id="addBindingModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div class="bg-gray-800 p-6 rounded-lg shadow-lg max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto" id="addBindingModalContent">
                     <h3 class="text-lg font-semibold mb-4 text-white">Add New Binding</h3>
+                    <p id="addBindingError" class="text-red-400 text-sm mb-2 hidden" role="alert"></p>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                        <div class="space-y-4 p-4 bg-gray-700 rounded-lg">
+                        <div class="space-y-3 p-4 bg-gray-700 rounded-lg">
                             <h4 class="font-bold text-indigo-400">Trigger</h4>
                             <div>
-                                <label for="bindSwitchId" class="block">Switch ID</label>
+                                <label for="bindSwitchId" class="block text-gray-300">Switch ID</label>
                                 <input type="number" id="bindSwitchId" placeholder="e.g., 3" class="mt-1 w-full bg-gray-600 text-white rounded-md px-3 py-2 border border-gray-500">
+                                <p id="bindSwitchIdWarning" class="mt-1 text-amber-400 text-xs hidden"></p>
                             </div>
                             <div>
-                                <label for="bindButton" class="block">Button #</label>
+                                <label for="bindButton" class="block text-gray-300">Button #</label>
                                 <input type="number" id="bindButton" placeholder="e.g., 1" class="mt-1 w-full bg-gray-600 text-white rounded-md px-3 py-2 border border-gray-500">
                             </div>
                             <div>
-                                <label for="bindOnAction" class="block">On Action</label>
+                                <label for="bindOnAction" class="block text-gray-300">On Action</label>
                                 <select id="bindOnAction" class="mt-1 w-full bg-gray-600 text-white rounded-md px-3 py-2 border border-gray-500">
-                                    <option>PRESS</option>
-                                    <option>RELEASE</option>
-                                    <option>LEVEL_ON</option>
-                                    <option>LEVEL_OFF</option>
+                                    <option>CLICK</option>
+                                    <option>HOLD</option>
+                                    <option>DOUBLE_CLICK</option>
+                                    <option>TRIPLE_CLICK</option>
+                                    <option>LONG_HOLD</option>
+                                    <option>HOLD_REPEAT</option>
                                 </select>
                             </div>
                         </div>
-                        <div class="space-y-4 p-4 bg-gray-700 rounded-lg">
+                        <div class="space-y-3 p-4 bg-gray-700 rounded-lg">
                             <h4 class="font-bold text-indigo-400">Action</h4>
                             <div>
-                                <label for="bindTarget" class="block">Target (Output or Group)</label>
-                                <input type="text" id="bindTarget" placeholder="e.g., 5 or 'Kitchen'" class="mt-1 w-full bg-gray-600 text-white rounded-md px-3 py-2 border border-gray-500">
+                                <label for="bindTarget" class="block text-gray-300">Target (Output or Group)</label>
+                                <select id="bindTarget" class="mt-1 w-full bg-gray-600 text-white rounded-md px-3 py-2 border border-gray-500">
+                                    <option value="">— Select target —</option>
+                                </select>
                             </div>
                             <div>
-                                <label for="bindState" class="block">State</label>
-                                <input type="text" id="bindState" placeholder="ON, OFF, or TOGGLE" class="mt-1 w-full bg-gray-600 text-white rounded-md px-3 py-2 border border-gray-500">
+                                <label for="bindState" class="block text-gray-300">State</label>
+                                <select id="bindState" class="mt-1 w-full bg-gray-600 text-white rounded-md px-3 py-2 border border-gray-500">
+                                    <option value="ON">ON</option>
+                                    <option value="OFF">OFF</option>
+                                    <option value="TOGGLE">TOGGLE</option>
+                                </select>
                             </div>
                             <div>
-                                <label for="bindBrightness" class="block">Brightness (Optional)</label>
-                                <input type="number" id="bindBrightness" placeholder="0-100" class="mt-1 w-full bg-gray-600 text-white rounded-md px-3 py-2 border border-gray-500">
+                                <label class="block text-gray-300">Brightness (Optional)</label>
+                                <div class="mt-1 flex items-center gap-2">
+                                    <input type="checkbox" id="bindUseBrightness" class="rounded bg-gray-600 border-gray-500">
+                                    <span class="text-gray-400 text-xs">Use brightness</span>
+                                </div>
+                                <div class="mt-1 flex items-center gap-2">
+                                    <div class="brightness-slider-wrap flex-1">
+                                        <div class="brightness-slider-track"></div>
+                                        <div class="brightness-slider-fill" id="bindBrightnessFill" style="width: 100%;"></div>
+                                        <div class="brightness-slider-glow" id="bindBrightnessGlow" style="width: 100%;"></div>
+                                        <input type="range" id="bindBrightness" min="0" max="100" value="100" class="brightness-slider h-2 rounded-lg cursor-pointer">
+                                    </div>
+                                    <span id="bindBrightnessValue" class="text-white font-mono w-10">100</span><span class="text-gray-400">%</span>
+                                </div>
                             </div>
                             <div>
-                                <label for="bindFade" class="block">Fade (Optional)</label>
+                                <label for="bindFade" class="block text-gray-300">Fade (Optional, ms)</label>
                                 <input type="number" id="bindFade" placeholder="milliseconds" class="mt-1 w-full bg-gray-600 text-white rounded-md px-3 py-2 border border-gray-500">
                             </div>
                         </div>
                     </div>
-                    <button id="addBindingBtn" class="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md transition duration-300">Add Binding</button>
+                    <div class="mt-4 flex justify-end gap-2">
+                        <button type="button" id="cancelAddBindingBtn" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md transition duration-300">Cancel</button>
+                        <button type="button" id="confirmAddBindingBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md transition duration-300">Add Binding</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="nodesSection" class="config-section hidden bg-gray-800 p-6 rounded-lg shadow-lg">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold border-b border-gray-700 pb-2 text-white">CAN Nodes</h2>
+                    <div class="flex gap-2">
+                        <button id="openNodeTimingBtn" class="text-sm bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md transition duration-300">Set timing for all nodes</button>
+                        <button id="refreshNodesBtn" class="text-sm bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md transition duration-300">Refresh</button>
+                    </div>
+                </div>
+                <p class="text-sm text-gray-400 mb-6">Discovered CAN bus nodes. Unconfigured nodes (ID 127) can be assigned a node ID. Nodes are discovered automatically when they send HEARTBEAT messages on the CAN bus.</p>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm text-left">
+                        <thead class="bg-gray-700 text-xs text-gray-300 uppercase">
+                            <tr>
+                                <th class="px-4 py-3">Node ID</th>
+                                <th class="px-4 py-3">Type</th>
+                                <th class="px-4 py-3">Inputs</th>
+                                <th class="px-4 py-3">Status</th>
+                                <th class="px-4 py-3">Last Seen</th>
+                                <th class="px-4 py-3">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="nodesTableBody">
+                        </tbody>
+                    </table>
+                </div>
+                <div id="nodeConfigModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div class="bg-gray-800 p-6 rounded-lg shadow-lg max-w-md w-full mx-4">
+                        <h3 class="text-lg font-semibold mb-4 text-white">Configure Node</h3>
+                        <div class="space-y-4">
+                            <div class="flex gap-4">
+                                <div class="flex-1">
+                                    <label for="configNodeIdDisplay" class="block text-sm font-medium text-gray-300 mb-1">Current Node ID</label>
+                                    <input type="text" id="configNodeIdDisplay" readonly class="w-full bg-gray-700 text-gray-400 rounded-md px-3 py-2 border border-gray-600">
+                                </div>
+                                <div class="flex-1">
+                                    <label for="newNodeId" class="block text-sm font-medium text-gray-300 mb-1">New Node ID (1-126)</label>
+                                    <input type="number" id="newNodeId" min="1" max="126" class="w-full bg-gray-600 text-white rounded-md px-3 py-2 border border-gray-500">
+                                </div>
+                            </div>
+                            <div class="flex gap-2">
+                                <button id="confirmNodeConfigBtn" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md transition duration-300">OK</button>
+                                <button id="cancelNodeConfigBtn" class="flex-1 bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md transition duration-300">Cancel</button>
+                            </div>
+                            <div class="border-t border-gray-600 pt-4 mt-4">
+                                <h4 class="text-sm font-medium text-gray-300 mb-2">Number of inputs</h4>
+                                <p class="text-xs text-gray-400 mb-2">Configure how many inputs (1–6) this node has. Send to node and save.</p>
+                                <div class="flex items-center gap-2">
+                                    <select id="nodeInputCountSelect" class="bg-gray-600 text-white rounded px-3 py-2 border border-gray-500">
+                                        <option value="1">1</option>
+                                        <option value="2">2</option>
+                                        <option value="3">3</option>
+                                        <option value="4" selected>4</option>
+                                        <option value="5">5</option>
+                                        <option value="6">6</option>
+                                    </select>
+                                    <button id="setInputCountBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-md transition duration-300">Set input count</button>
+                                </div>
+                            </div>
+                            <div class="border-t border-gray-600 pt-4 mt-4">
+                                <h4 class="text-sm font-medium text-gray-300 mb-2">Find Me output (I/O index)</h4>
+                                <p class="text-xs text-gray-400 mb-2">ESP32-S3 chip I/O (GPIO) index 0–48 to blink for Find Me.</p>
+                                <div class="flex items-center gap-2">
+                                    <input type="number" id="nodeFindMeOutputInput" min="0" max="48" value="0" class="bg-gray-600 text-white rounded px-3 py-2 border border-gray-500 w-20">
+                                    <span class="text-gray-400 mx-2">|</span>
+                                    <label class="text-sm text-gray-400">Blink for</label>
+                                    <input type="number" id="nodeFindMeDurationInput" min="1" max="30" value="5" class="bg-gray-600 text-white rounded px-3 py-2 border border-gray-500 w-16" title="Duration in minutes">
+                                    <span class="text-sm text-gray-400">min</span>
+                                    <button id="findMeFromModalBtn" class="bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold py-2 px-4 rounded-md transition duration-300">Find Me</button>
+                                </div>
+                            </div>
+                            <div class="border-t border-gray-600 pt-4 mt-4">
+                                <h4 class="text-sm font-medium text-gray-300 mb-2">Switch type per input</h4>
+                                <p class="text-xs text-gray-400 mb-2">Set each input to momentary (button) or toggle (rocker/maintained).</p>
+                                <div id="nodeInputTypesContainer" class="space-y-2"></div>
+                                <button id="applyInputTypesBtn" class="mt-3 w-full bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-md transition duration-300 hidden">Apply input types</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="nodeTimingModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div class="bg-gray-800 p-6 rounded-lg shadow-lg max-w-md w-full mx-4">
+                        <h3 class="text-lg font-semibold mb-2 text-white">Input timing (all nodes)</h3>
+                        <p class="text-xs text-gray-400 mb-4">Same thresholds for every node. Long hold max 255 ms.</p>
+                        <div class="grid grid-cols-2 gap-3 mb-4">
+                            <div>
+                                <label for="timingClickMax" class="block text-xs text-gray-400 mb-1">Click max (ms)</label>
+                                <input type="number" id="timingClickMax" min="0" max="65535" value="500" class="w-full bg-gray-600 text-white rounded px-2 py-1.5 border border-gray-500 text-sm">
+                            </div>
+                            <div>
+                                <label for="timingDblGap" class="block text-xs text-gray-400 mb-1">Double-click gap (ms)</label>
+                                <input type="number" id="timingDblGap" min="0" max="65535" value="400" class="w-full bg-gray-600 text-white rounded px-2 py-1.5 border border-gray-500 text-sm">
+                            </div>
+                            <div>
+                                <label for="timingHoldMin" class="block text-xs text-gray-400 mb-1">Hold min (ms)</label>
+                                <input type="number" id="timingHoldMin" min="0" max="65535" value="800" class="w-full bg-gray-600 text-white rounded px-2 py-1.5 border border-gray-500 text-sm">
+                            </div>
+                            <div>
+                                <label for="timingLongHold" class="block text-xs text-gray-400 mb-1">Long hold (0–255 ms)</label>
+                                <input type="number" id="timingLongHold" min="0" max="255" value="200" class="w-full bg-gray-600 text-white rounded px-2 py-1.5 border border-gray-500 text-sm">
+                            </div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button id="closeNodeTimingBtn" class="flex-1 bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md transition duration-300">Close</button>
+                            <button id="sendTimingToAllBtn" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md transition duration-300">Send to all nodes</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -223,15 +445,37 @@
                     <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">Send Command</h2>
                     <div class="space-y-4">
                         <div>
-                            <label for="commandTargetInput" class="block text-sm font-medium text-gray-300">Output/Group</label>
-                            <input type="text" id="commandTargetInput" placeholder="e.g., 1 or 'lights'" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <label for="commandTargetSelect" class="block text-sm font-medium text-gray-300">Output / Group</label>
+                            <select id="commandTargetSelect" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                <option value="">— Select target —</option>
+                            </select>
                         </div>
                         <div>
-                            <label for="commandValueInput" class="block text-sm font-medium text-gray-300">Value</label>
-                            <input type="text" id="commandValueInput" placeholder="e.g., ON, OFF, 50" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <label for="commandStateSelect" class="block text-sm font-medium text-gray-300">State</label>
+                            <select id="commandStateSelect" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                <option value="ON">ON</option>
+                                <option value="OFF">OFF</option>
+                                <option value="TOGGLE">TOGGLE</option>
+                            </select>
                         </div>
                         <div>
-                            <label for="fadeInput" class="block text-sm font-medium text-gray-300">Fade Delay (ms)</label>
+                            <label class="block text-sm font-medium text-gray-300">Brightness (optional)</label>
+                            <div class="mt-1 flex items-center gap-2">
+                                <input type="checkbox" id="commandUseBrightness" class="rounded bg-gray-600 border-gray-500">
+                                <span class="text-gray-400 text-xs">Use brightness</span>
+                            </div>
+                            <div class="mt-1 flex items-center gap-2">
+                                <div class="brightness-slider-wrap flex-1">
+                                    <div class="brightness-slider-track"></div>
+                                    <div class="brightness-slider-fill" id="commandBrightnessFill" style="width: 100%;"></div>
+                                    <div class="brightness-slider-glow" id="commandBrightnessGlow" style="width: 100%;"></div>
+                                    <input type="range" id="commandBrightness" min="0" max="100" value="100" class="brightness-slider h-2 rounded-lg cursor-pointer">
+                                </div>
+                                <span id="commandBrightnessValue" class="text-white font-mono w-10">100</span><span class="text-gray-400">%</span>
+                            </div>
+                        </div>
+                        <div>
+                            <label for="fadeInput" class="block text-sm font-medium text-gray-300">Fade (ms)</label>
                             <input type="number" id="fadeInput" placeholder="e.g., 500" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                         </div>
                         <button id="sendCommandBtn" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center">
@@ -262,6 +506,9 @@
                             <label for="groupStaggerMs" class="block text-sm font-medium text-gray-300">Group Stagger Delay (ms)</label>
                             <input type="number" id="groupStaggerMs" placeholder="e.g., 150" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600">
                             <p class="text-xs text-gray-400 mt-1">The delay between each channel in a group when stagger is enabled. Set to 0 to disable all staggering.</p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-400 mt-1">CAN input is event-based (CLICK/HOLD/etc). Configure node firmware to send detected events.</p>
                         </div>
                     </div>
                 </div>
@@ -339,8 +586,11 @@
             const mqttClientId = document.getElementById('mqttClientId');
             const mqttUsername = document.getElementById('mqttUsername');
             const mqttPassword = document.getElementById('mqttPassword');
-            const commandTargetInput = document.getElementById('commandTargetInput');
-            const commandValueInput = document.getElementById('commandValueInput');
+            const commandTargetSelect = document.getElementById('commandTargetSelect');
+            const commandStateSelect = document.getElementById('commandStateSelect');
+            const commandUseBrightness = document.getElementById('commandUseBrightness');
+            const commandBrightness = document.getElementById('commandBrightness');
+            const commandBrightnessValue = document.getElementById('commandBrightnessValue');
             const fadeInput = document.getElementById('fadeInput');
             const sendCommandBtn = document.getElementById('sendCommandBtn');
             const sendCommandBtnText = document.getElementById('sendCommandBtnText');
@@ -367,15 +617,39 @@
 
             const bindingsTableBody = document.getElementById('bindingsTableBody');
             const addBindingBtn = document.getElementById('addBindingBtn');
+            const addBindingModal = document.getElementById('addBindingModal');
+            const cancelAddBindingBtn = document.getElementById('cancelAddBindingBtn');
+            const confirmAddBindingBtn = document.getElementById('confirmAddBindingBtn');
             const bindSwitchId = document.getElementById('bindSwitchId');
             const bindButton = document.getElementById('bindButton');
             const bindOnAction = document.getElementById('bindOnAction');
             const bindTarget = document.getElementById('bindTarget');
             const bindState = document.getElementById('bindState');
             const bindBrightness = document.getElementById('bindBrightness');
+            const bindBrightnessValue = document.getElementById('bindBrightnessValue');
+            const bindUseBrightness = document.getElementById('bindUseBrightness');
             const bindFade = document.getElementById('bindFade');
+            const refreshNodesBtn = document.getElementById('refreshNodesBtn');
+            const nodesTableBody = document.getElementById('nodesTableBody');
+            const nodeConfigModal = document.getElementById('nodeConfigModal');
+            const newNodeId = document.getElementById('newNodeId');
+            const configNodeIdDisplay = document.getElementById('configNodeIdDisplay');
+            const confirmNodeConfigBtn = document.getElementById('confirmNodeConfigBtn');
+            const cancelNodeConfigBtn = document.getElementById('cancelNodeConfigBtn');
+            const nodeInputTypesContainer = document.getElementById('nodeInputTypesContainer');
+            const applyInputTypesBtn = document.getElementById('applyInputTypesBtn');
+            const nodeInputCountSelect = document.getElementById('nodeInputCountSelect');
+            const setInputCountBtn = document.getElementById('setInputCountBtn');
+            const nodeFindMeOutputInput = document.getElementById('nodeFindMeOutputInput');
+            const nodeFindMeDurationInput = document.getElementById('nodeFindMeDurationInput');
+            const findMeFromModalBtn = document.getElementById('findMeFromModalBtn');
 
             let currentBindings = [];
+            let currentConfiguringNodeId = null;
+            let currentConfiguringNodeInputCount = 0;
+            let currentConfiguringNodeType = 0;
+            let currentConfig = {}; // config snapshot for target dropdown etc.
+            let editingBindingIndex = null; // when set, modal is in edit mode
 
             // Reusable HTML template for the save button
             const saveButtonTemplate = `
@@ -400,7 +674,37 @@
                     handleTabClick(event.target);
                 }
             });
-            addBindingBtn.addEventListener('click', addBinding);
+            addBindingBtn.addEventListener('click', () => openAddBindingModal());
+            document.querySelectorAll('.bind-template-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const state = btn.dataset.state || 'ON';
+                    const brightness = btn.dataset.brightness;
+                    openAddBindingModal(null, { state, brightness });
+                });
+            });
+            if (confirmAddBindingBtn) confirmAddBindingBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); submitAddBinding(); });
+            if (cancelAddBindingBtn) cancelAddBindingBtn.addEventListener('click', closeAddBindingModal);
+            if (addBindingModal) addBindingModal.addEventListener('click', (e) => { if (e.target === addBindingModal) closeAddBindingModal(); });
+            const addBindingModalContent = document.getElementById('addBindingModalContent');
+            if (addBindingModalContent) addBindingModalContent.addEventListener('click', (e) => e.stopPropagation());
+            if (bindBrightness && bindBrightnessValue) bindBrightness.addEventListener('input', () => { bindBrightnessValue.textContent = bindBrightness.value; updateBrightnessSliderFill(bindBrightness); });
+            if (commandBrightness && commandBrightnessValue) commandBrightness.addEventListener('input', () => { commandBrightnessValue.textContent = commandBrightness.value; updateBrightnessSliderFill(commandBrightness); });
+            
+            // Node configuration event listeners
+            if (refreshNodesBtn) refreshNodesBtn.addEventListener('click', fetchNodes);
+            if (confirmNodeConfigBtn) confirmNodeConfigBtn.addEventListener('click', confirmNodeConfig);
+            if (cancelNodeConfigBtn) cancelNodeConfigBtn.addEventListener('click', cancelNodeConfig);
+            if (applyInputTypesBtn) applyInputTypesBtn.addEventListener('click', applyInputTypes);
+            if (setInputCountBtn) setInputCountBtn.addEventListener('click', setInputCount);
+            if (findMeFromModalBtn) findMeFromModalBtn.addEventListener('click', sendFindMeFromModal);
+            const openNodeTimingBtn = document.getElementById('openNodeTimingBtn');
+            const sendTimingToAllBtn = document.getElementById('sendTimingToAllBtn');
+            const nodeTimingModal = document.getElementById('nodeTimingModal');
+            const closeNodeTimingBtn = document.getElementById('closeNodeTimingBtn');
+            if (openNodeTimingBtn) openNodeTimingBtn.addEventListener('click', () => { if (nodeTimingModal) nodeTimingModal.classList.remove('hidden'); });
+            if (closeNodeTimingBtn) closeNodeTimingBtn.addEventListener('click', () => { if (nodeTimingModal) nodeTimingModal.classList.add('hidden'); });
+            if (nodeTimingModal) nodeTimingModal.addEventListener('click', (e) => { if (e.target === nodeTimingModal) nodeTimingModal.classList.add('hidden'); });
+            if (sendTimingToAllBtn) sendTimingToAllBtn.addEventListener('click', sendTimingToAllNodes);
 
             // --- Functions ---
 
@@ -411,6 +715,8 @@
                 mainContent.querySelectorAll('.config-section').forEach(section => {
                     section.id === targetId ? section.classList.remove('hidden') : section.classList.add('hidden');
                 });
+                if (targetId === 'nodesSection') fetchNodes();
+                if (targetId === 'commandSection') populateCommandTargetSelect();
             }
 
             async function fetchData() {
@@ -430,6 +736,7 @@
                     // Add save buttons to the relevant sections
                     document.getElementById('i2cMappingSection').insertAdjacentHTML('beforeend', saveButtonTemplate);
                     document.getElementById('groupConfigSection').insertAdjacentHTML('beforeend', saveButtonTemplate);
+                    document.getElementById('bindingsSection').insertAdjacentHTML('beforeend', saveButtonTemplate);
                     document.getElementById('networkConfigSection').insertAdjacentHTML('beforeend', saveButtonTemplate);
                     
                     // Add event listeners to ALL the new save buttons
@@ -514,6 +821,7 @@
 
                 // --- Populate Network, Groups, and Bindings (no changes here) ---
                 if (data.config) {
+                    currentConfig = data.config;
                     if (data.config.wifi) {
                         wifiSsid.value = data.config.wifi.ssid || '';
                         wifiPassword.value = data.config.wifi.password || '';
@@ -540,13 +848,27 @@
                     currentBindings = data.config.bindings;
                     renderBindingsTable();
                 }
+
+                // Fetch nodes
+                fetchNodes();
             }
             
             /**
              * Renders the bindings table from the global currentBindings array
              */
             function renderBindingsTable() {
-                bindingsTableBody.innerHTML = ''; // Clear table
+                const tbody = document.getElementById('bindingsTableBody');
+                if (!tbody) return;
+                tbody.innerHTML = '';
+                // Sort by node (switch) ID, then by button
+                currentBindings.sort((a, b) => {
+                    const sA = Number(a.trigger.switchId) || 0;
+                    const sB = Number(b.trigger.switchId) || 0;
+                    if (sA !== sB) return sA - sB;
+                    const bA = Number(a.trigger.button) || 0;
+                    const bB = Number(b.trigger.button) || 0;
+                    return bA - bB;
+                });
                 currentBindings.forEach((binding, index) => {
                     const triggerText = `Switch ${binding.trigger.switchId}, Button ${binding.trigger.button} (${binding.trigger.action})`;
                     let actionText = '';
@@ -555,55 +877,669 @@
                     } else if (binding.action.group) {
                         actionText = `Group '${binding.action.group}'`;
                     }
-                    actionText += ` -> ${binding.action.state || 'brightness ' + binding.action.brightness}`;
+                    const parts = [];
+                    if (binding.action.state) parts.push(binding.action.state);
+                    if (binding.action.brightness !== undefined && binding.action.brightness >= 0) parts.push(`${binding.action.brightness}%`);
+                    if (binding.action.fade) parts.push(`${binding.action.fade}ms fade`);
+                    if (parts.length) actionText += ' -> ' + parts.join(', ');
                     const row = document.createElement('tr');
                     row.className = 'border-b border-gray-700';
                     row.innerHTML = `
                         <td class="px-4 py-3 font-mono">${triggerText}</td>
                         <td class="px-4 py-3 font-mono">${actionText}</td>
                         <td class="px-4 py-3 text-right">
+                            <button class="edit-binding-btn text-indigo-400 hover:text-indigo-300 mr-2" data-index="${index}">Edit</button>
                             <button class="remove-binding-btn text-red-400 hover:text-red-300" data-index="${index}">Remove</button>
                         </td>
                     `;
-                    bindingsTableBody.appendChild(row);
+                    tbody.appendChild(row);
                 });
 
-                // Add event listeners to all new "Remove" buttons
-                document.querySelectorAll('.remove-binding-btn').forEach(button => {
+                // Add event listeners to all new "Remove" and "Edit" buttons
+                tbody.querySelectorAll('.remove-binding-btn').forEach(button => {
                     button.addEventListener('click', removeBinding);
                 });
+                tbody.querySelectorAll('.edit-binding-btn').forEach(button => {
+                    button.addEventListener('click', (e) => {
+                        const index = parseInt(e.target.dataset.index, 10);
+                        openAddBindingModal(index);
+                    });
+                });
+            }
+
+            function openAddBindingModal(editIndex = null, template = null) {
+                // Ensure we're in edit mode only when a valid number index is passed (not the click event)
+                const isEditMode = typeof editIndex === 'number' && editIndex >= 0 && editIndex < currentBindings.length;
+                editingBindingIndex = isEditMode ? editIndex : null;
+                setAddBindingError('');
+                resetAddBindingForm();
+                const sel = bindTarget;
+                if (sel) {
+                    sel.innerHTML = '<option value="">— Select target —</option>';
+                    const groups = currentConfig && currentConfig.groups ? currentConfig.groups : {};
+                    const availableOutputs = getAvailableOutputs();
+                    for (const outputId of availableOutputs) {
+                        const opt = document.createElement('option');
+                        opt.value = 'o:' + outputId;
+                        opt.textContent = 'Output ' + outputId;
+                        sel.appendChild(opt);
+                    }
+                    for (const name of Object.keys(groups)) {
+                        const opt = document.createElement('option');
+                        opt.value = 'g:' + name;
+                        opt.textContent = "Group '" + name + "'";
+                        sel.appendChild(opt);
+                    }
+                }
+                const modalTitle = addBindingModal && addBindingModal.querySelector('h3');
+                if (modalTitle) modalTitle.textContent = editingBindingIndex !== null ? 'Edit Binding' : 'Add New Binding';
+                if (confirmAddBindingBtn) confirmAddBindingBtn.textContent = editingBindingIndex !== null ? 'Save' : 'Add Binding';
+
+                if (editingBindingIndex !== null && currentBindings[editingBindingIndex]) {
+                    const b = currentBindings[editingBindingIndex];
+                    if (bindSwitchId) bindSwitchId.value = b.trigger.switchId || '';
+                    if (bindButton) bindButton.value = b.trigger.button || '';
+                    if (bindOnAction) bindOnAction.value = b.trigger.action || 'CLICK';
+                    if (bindState) bindState.value = b.action.state || 'ON';
+                    if (bindTarget) {
+                        if (b.action.output != null) bindTarget.value = 'o:' + b.action.output;
+                        else if (b.action.group) bindTarget.value = 'g:' + b.action.group;
+                    }
+                    if (bindUseBrightness) bindUseBrightness.checked = (b.action.brightness !== undefined && b.action.brightness >= 0);
+                    if (bindBrightness) {
+                        bindBrightness.value = (b.action.brightness !== undefined && b.action.brightness >= 0) ? b.action.brightness : 100;
+                        if (bindBrightnessValue) bindBrightnessValue.textContent = bindBrightness.value;
+                        updateBrightnessSliderFill(bindBrightness);
+                    }
+                    if (bindFade) bindFade.value = b.action.fade || '';
+                }
+                if (template && template.state) {
+                    if (bindState) bindState.value = template.state;
+                    if (template.brightness !== undefined && template.brightness !== '') {
+                        const bVal = parseInt(template.brightness, 10);
+                        if (!isNaN(bVal)) {
+                        if (bindUseBrightness) bindUseBrightness.checked = true;
+                        if (bindBrightness) { bindBrightness.value = bVal; if (bindBrightnessValue) bindBrightnessValue.textContent = bVal; updateBrightnessSliderFill(bindBrightness); }
+                        }
+                    }
+                }
+                if (addBindingModal) addBindingModal.classList.remove('hidden');
+                const warnEl = document.getElementById('bindSwitchIdWarning');
+                if (warnEl) { warnEl.classList.add('hidden'); warnEl.textContent = ''; }
+                fetch('/api/nodes').then(r => r.ok ? r.json() : []).then(nodes => {
+                    const ids = (nodes || []).map(n => n.node_id);
+                    const sid = bindSwitchId && bindSwitchId.value ? parseInt(bindSwitchId.value, 10) : NaN;
+                    if (!isNaN(sid) && ids.indexOf(sid) === -1 && sid !== 127) {
+                        if (warnEl) { warnEl.textContent = 'Switch ID not in discovered nodes.'; warnEl.classList.remove('hidden'); }
+                    }
+                }).catch(() => {});
+            }
+
+            function closeAddBindingModal() {
+                if (addBindingModal) addBindingModal.classList.add('hidden');
+                editingBindingIndex = null;
+                resetAddBindingForm();
+            }
+
+            function resetAddBindingForm() {
+                if (bindSwitchId) bindSwitchId.value = '';
+                if (bindButton) bindButton.value = '';
+                if (bindTarget) bindTarget.value = '';
+                if (bindFade) bindFade.value = '';
+                if (bindState) bindState.value = 'ON';
+                if (bindUseBrightness) bindUseBrightness.checked = false;
+                if (bindBrightness) bindBrightness.value = '100';
+                if (bindBrightnessValue) bindBrightnessValue.textContent = '100';
+                if (bindBrightness) updateBrightnessSliderFill(bindBrightness);
+            }
+
+            function setAddBindingError(msg) {
+                const el = document.getElementById('addBindingError');
+                if (el) { el.textContent = msg || ''; msg ? el.classList.remove('hidden') : el.classList.add('hidden'); }
+            }
+
+            function submitAddBinding() {
+                setAddBindingError('');
+                if (editingBindingIndex !== null) {
+                    updateBindingAt(editingBindingIndex);
+                } else {
+                    addBinding();
+                }
+            }
+
+            function updateBindingAt(index) {
+                const trigger = {
+                    switchId: parseInt(bindSwitchId.value, 10),
+                    button: parseInt(bindButton.value, 10),
+                    action: bindOnAction.value
+                };
+                const action = {};
+                const targetVal = bindTarget && bindTarget.value ? bindTarget.value.trim() : '';
+                if (!targetVal) { setAddBindingError('Please select a target (Output or Group).'); showStatus('Please select a target (Output or Group).', 'error'); return; }
+                if (targetVal.startsWith('o:')) {
+                    action.output = parseInt(targetVal.slice(2), 10);
+                    if (isNaN(action.output)) { setAddBindingError('Invalid target.'); return; }
+                } else if (targetVal.startsWith('g:')) {
+                    action.group = targetVal.slice(2);
+                } else { setAddBindingError('Invalid target.'); return; }
+                action.state = bindState && bindState.value ? bindState.value : 'ON';
+                if (bindUseBrightness && bindUseBrightness.checked && bindBrightness) {
+                    const b = parseInt(bindBrightness.value, 10);
+                    if (!isNaN(b)) action.brightness = Math.min(100, Math.max(0, b));
+                }
+                if (bindFade && bindFade.value) {
+                    const f = parseInt(bindFade.value, 10);
+                    if (!isNaN(f) && f > 0) action.fade = f;
+                }
+                if (isNaN(trigger.switchId) || isNaN(trigger.button)) {
+                    setAddBindingError('Switch ID and Button are required (numbers).');
+                    showStatus('Switch ID and Button are required.', 'error');
+                    return;
+                }
+                setAddBindingError('');
+                currentBindings[index] = { trigger, action };
+                renderBindingsTable();
+                showStatus('Binding updated.', 'success');
+                closeAddBindingModal();
             }
             
             function addBinding() {
                 const trigger = {
-                    switchId: parseInt(bindSwitchId.value),
-                    button: parseInt(bindButton.value),
+                    switchId: parseInt(bindSwitchId.value, 10),
+                    button: parseInt(bindButton.value, 10),
                     action: bindOnAction.value
                 };
                 const action = {};
-                const target = bindTarget.value.trim();
-                if (!isNaN(parseInt(target))) {
-                    action.output = parseInt(target);
-                } else {
-                    action.group = target;
-                }
-                if (bindState.value) action.state = bindState.value.trim().toUpperCase();
-                if (bindBrightness.value) action.brightness = parseInt(bindBrightness.value);
-                if (bindFade.value) action.fade = parseInt(bindFade.value);
-                if (!trigger.switchId || !trigger.button || !target) {
-                    showStatus('Switch ID, Button, and Target are required.', 'error');
+                const targetVal = bindTarget && bindTarget.value ? bindTarget.value.trim() : '';
+                if (!targetVal) {
+                    setAddBindingError('Please select a target (Output or Group).');
+                    showStatus('Please select a target (Output or Group).', 'error');
                     return;
                 }
+                if (targetVal.startsWith('o:')) {
+                    action.output = parseInt(targetVal.slice(2), 10);
+                    if (isNaN(action.output)) { setAddBindingError('Invalid target.'); return; }
+                } else if (targetVal.startsWith('g:')) {
+                    action.group = targetVal.slice(2);
+                } else {
+                    setAddBindingError('Invalid target.');
+                    showStatus('Invalid target.', 'error');
+                    return;
+                }
+                action.state = bindState && bindState.value ? bindState.value : 'ON';
+                if (bindUseBrightness && bindUseBrightness.checked && bindBrightness) {
+                    const b = parseInt(bindBrightness.value, 10);
+                    if (!isNaN(b)) action.brightness = Math.min(100, Math.max(0, b));
+                }
+                if (bindFade && bindFade.value) {
+                    const f = parseInt(bindFade.value, 10);
+                    if (!isNaN(f) && f > 0) action.fade = f;
+                }
+                if (isNaN(trigger.switchId) || isNaN(trigger.button)) {
+                    setAddBindingError('Switch ID and Button are required (enter numbers).');
+                    showStatus('Switch ID and Button are required.', 'error');
+                    return;
+                }
+                setAddBindingError('');
                 currentBindings.push({ trigger, action });
                 renderBindingsTable();
-                // Clear form fields
-                bindSwitchId.value = bindButton.value = bindTarget.value = bindState.value = bindBrightness.value = bindFade.value = '';
+                showStatus('Binding added.', 'success');
+                closeAddBindingModal();
             }
             
             function removeBinding(event) {
                 const index = parseInt(event.target.dataset.index);
                 currentBindings.splice(index, 1);
                 renderBindingsTable();
+            }
+
+            // --- Nodes Functions ---
+            async function fetchNodes() {
+                try {
+                    const response = await fetch('/api/nodes');
+                    if (!response.ok) throw new Error('Failed to fetch nodes');
+                    const nodes = await response.json();
+                    renderNodesTable(nodes);
+                } catch (error) {
+                    console.error('Error fetching nodes:', error);
+                    if (nodesTableBody) {
+                        nodesTableBody.innerHTML = '<tr><td colspan="6" class="px-4 py-3 text-center text-red-400">Error loading nodes</td></tr>';
+                    }
+                }
+            }
+
+            function renderNodesTable(nodes) {
+                if (!nodesTableBody) return;
+                nodesTableBody.innerHTML = '';
+                
+                if (!nodes || nodes.length === 0) {
+                    nodesTableBody.innerHTML = '<tr><td colspan="6" class="px-4 py-3 text-center text-gray-400">No nodes discovered yet.<br><span class="text-xs">Nodes will appear here when they send HEARTBEAT messages on the CAN bus.</span></td></tr>';
+                    return;
+                }
+
+                // Sort nodes: unconfigured first, then by node_id
+                const sortedNodes = [...nodes].sort((a, b) => {
+                    if (a.node_id === 127 && b.node_id !== 127) return -1;
+                    if (a.node_id !== 127 && b.node_id === 127) return 1;
+                    return a.node_id - b.node_id;
+                });
+
+                sortedNodes.forEach(node => {
+                    const row = document.createElement('tr');
+                    row.className = 'border-b border-gray-700 hover:bg-gray-700';
+                    
+                    const statusColor = node.status === 'online' ? 'text-green-400' : 'text-gray-400';
+                    const statusDot = node.status === 'online' ? '●' : '○';
+                    
+                    // last_seen_ago_ms is milliseconds since last heartbeat (0 = never)
+                    const agoMs = node.last_seen_ago_ms != null ? node.last_seen_ago_ms : (node.last_seen ? node.last_seen / 1000 : 0);
+                    let lastSeenStr = 'Never';
+                    if (agoMs > 0) {
+                        if (agoMs < 60000) lastSeenStr = `${Math.round(agoMs / 1000)} sec ago`;
+                        else if (agoMs < 3600000) lastSeenStr = `${Math.round(agoMs / 60000)} min ago`;
+                        else lastSeenStr = `${(agoMs / 3600000).toFixed(1)} hr ago`;
+                    }
+                    
+                    const nodeIdDisplay = node.node_id === 127 ? 
+                        `<span class="text-yellow-400 font-bold">${node.node_id} (Unconfigured)</span>` : 
+                        node.node_id;
+                    
+                    let actionsHtml = '';
+                    if (node.node_id === 127) {
+                        actionsHtml = `<button class="configure-node-btn text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded mr-2" data-node-id="${node.node_id}">Configure</button>
+                                      <button class="reboot-node-btn text-xs bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded mr-2" data-node-id="${node.node_id}">Reboot</button>
+                                      <button class="remove-node-btn text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded" data-node-id="${node.node_id}">Remove</button>`;
+                    } else {
+                        actionsHtml = `<button class="configure-node-btn text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded mr-2" data-node-id="${node.node_id}">Configure</button>
+                                      <button class="reboot-node-btn text-xs bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded mr-2" data-node-id="${node.node_id}">Reboot</button>
+                                      <button class="remove-node-btn text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded" data-node-id="${node.node_id}">Remove</button>`;
+                    }
+                    
+                    row.innerHTML = `
+                        <td class="px-4 py-3">${nodeIdDisplay}</td>
+                        <td class="px-4 py-3">${node.type_string || 'unknown'}</td>
+                        <td class="px-4 py-3">${node.input_count || 0}</td>
+                        <td class="px-4 py-3 ${statusColor}">${statusDot} ${node.status || 'unknown'}</td>
+                        <td class="px-4 py-3 text-xs text-gray-400">${lastSeenStr}</td>
+                        <td class="px-4 py-3">${actionsHtml}</td>
+                    `;
+                    
+                    nodesTableBody.appendChild(row);
+                });
+
+                // Add event listeners for configure and remove buttons
+                document.querySelectorAll('.configure-node-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const nodeId = parseInt(e.target.dataset.nodeId);
+                        openNodeConfigModal(nodeId);
+                    });
+                });
+
+                document.querySelectorAll('.remove-node-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const nodeId = parseInt(e.target.dataset.nodeId);
+                        removeNode(nodeId, e);
+                    });
+                });
+
+                document.querySelectorAll('.reboot-node-btn').forEach(btn => {
+                    btn.addEventListener('click', async (e) => {
+                        const nodeId = parseInt(e.target.dataset.nodeId);
+                        const btnEl = e.target;
+                        const origText = btnEl.textContent;
+                        btnEl.textContent = 'Sending...';
+                        btnEl.disabled = true;
+                        try {
+                            const response = await fetch('/api/node/config', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ target_node_id: nodeId, command: 'reboot' })
+                            });
+                            if (!response.ok) throw new Error(await response.text());
+                            btnEl.textContent = 'Sent';
+                            setTimeout(() => { btnEl.textContent = origText; btnEl.disabled = false; }, 2000);
+                        } catch (err) {
+                            console.error('Reboot node:', err);
+                            alert('Failed to send reboot: ' + err.message);
+                            btnEl.textContent = origText;
+                            btnEl.disabled = false;
+                        }
+                    });
+                });
+            }
+
+            function openNodeConfigModal(nodeId) {
+                currentConfiguringNodeId = nodeId;
+                if (configNodeIdDisplay) configNodeIdDisplay.value = `Node ID: ${nodeId}`;
+                if (newNodeId) {
+                    newNodeId.value = nodeId === 127 ? '' : nodeId;
+                    newNodeId.placeholder = nodeId === 127 ? 'Enter new node ID' : 'Enter new node ID';
+                }
+                if (nodeConfigModal) nodeConfigModal.classList.remove('hidden');
+                loadNodeInputTypes(nodeId);
+            }
+
+            async function loadNodeInputTypes(nodeId) {
+                if (!nodeInputTypesContainer) return;
+                nodeInputTypesContainer.innerHTML = '';
+                if (applyInputTypesBtn) applyInputTypesBtn.classList.add('hidden');
+                try {
+                    const res = await fetch('/api/nodes');
+                    if (!res.ok) return;
+                    const nodes = await res.json();
+                    const node = nodes.find(n => n.node_id === nodeId);
+                    if (!node) return;
+                    const inputCount = Math.min(Math.max(parseInt(node.input_count, 10) || 0, 0), 6);
+                    currentConfiguringNodeInputCount = inputCount;
+                    currentConfiguringNodeType = node.node_type || 0;
+                    if (nodeInputCountSelect) {
+                        nodeInputCountSelect.value = inputCount > 0 ? String(inputCount) : '4';
+                    }
+                    if (nodeFindMeOutputInput) {
+                        const fmOut = node.find_me_output_index;
+                        nodeFindMeOutputInput.value = (fmOut !== undefined && fmOut !== 0xFF) ? String(fmOut) : '0';
+                    }
+                    if (nodeFindMeDurationInput) {
+                        nodeFindMeDurationInput.value = '5';
+                    }
+                    if (inputCount === 0) {
+                        nodeInputTypesContainer.innerHTML = '<p class="text-xs text-gray-400">Set number of inputs above (1–6), then configure switch types below.</p>';
+                        if (applyInputTypesBtn) applyInputTypesBtn.classList.add('hidden');
+                        return;
+                    }
+                    const inputConfig = node.input_config || [];
+                    const isMechanical = (node.node_type === 2);
+                    for (let i = 0; i < inputCount; i++) {
+                        const entry = inputConfig[i];
+                        const mode = (entry && typeof entry.mode !== 'undefined') ? (entry.mode === 1 ? '1' : '0') : '0';
+                        const label = (entry && entry.label) ? String(entry.label) : '';
+                        const gpioVal = (entry && typeof entry.gpio !== 'undefined' && entry.gpio >= 0 && entry.gpio <= 48) ? String(entry.gpio) : '';
+                        const row = document.createElement('div');
+                        row.className = 'flex flex-col gap-1';
+                        row.innerHTML = `
+                            <div class="flex items-center justify-between gap-2">
+                                <label class="text-sm text-gray-300">Input ${i + 1}</label>
+                                <div class="flex items-center gap-2">
+                                    ${isMechanical ? `<input type="number" min="0" max="48" class="node-input-gpio-input bg-gray-600 text-white rounded px-2 py-1 text-sm border border-gray-500 w-20" data-input-index="${i}" placeholder="GPIO" value="${gpioVal}">` : ''}
+                                    <select class="node-input-mode-select bg-gray-600 text-white rounded px-2 py-1 text-sm border border-gray-500" data-input-index="${i}">
+                                        <option value="0" ${mode === '0' ? 'selected' : ''}>Momentary</option>
+                                        <option value="1" ${mode === '1' ? 'selected' : ''}>Toggle</option>
+                                    </select>
+                                </div>
+                            </div>
+                            ${!isMechanical ? `<input type="text" class="node-input-label-input bg-gray-600 text-white rounded px-2 py-1 text-sm border border-gray-500 w-full" data-input-index="${i}" placeholder="Label (e.g. Kitchen)" maxlength="24" value="${label.replace(/"/g, '&quot;')}">` : ''}
+                        `;
+                        nodeInputTypesContainer.appendChild(row);
+                    }
+                    if (applyInputTypesBtn) applyInputTypesBtn.classList.remove('hidden');
+                } catch (e) {
+                    console.error('Load node input types:', e);
+                    nodeInputTypesContainer.innerHTML = '<p class="text-xs text-red-400">Failed to load input config.</p>';
+                }
+            }
+
+            async function setInputCount() {
+                if (currentConfiguringNodeId === null) return;
+                if (!nodeInputCountSelect || !setInputCountBtn) return;
+                const count = parseInt(nodeInputCountSelect.value, 10);
+                if (isNaN(count) || count < 1 || count > 6) {
+                    alert('Select 1–6 inputs.');
+                    return;
+                }
+                const origText = setInputCountBtn.textContent;
+                setInputCountBtn.textContent = 'Sending...';
+                setInputCountBtn.disabled = true;
+                try {
+                    const response = await fetch('/api/node/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            target_node_id: currentConfiguringNodeId,
+                            command: 'set_input_count',
+                            count: count
+                        })
+                    });
+                    if (!response.ok) throw new Error(await response.text());
+                    setInputCountBtn.textContent = 'Saved';
+                    setTimeout(() => { setInputCountBtn.textContent = origText; setInputCountBtn.disabled = false; }, 1500);
+                    loadNodeInputTypes(currentConfiguringNodeId);
+                } catch (error) {
+                    console.error('Set input count:', error);
+                    alert('Error setting input count: ' + error.message);
+                    setInputCountBtn.textContent = origText;
+                    setInputCountBtn.disabled = false;
+                }
+            }
+
+            async function sendFindMeFromModal() {
+                if (currentConfiguringNodeId === null) return;
+                if (!nodeFindMeOutputInput || !nodeFindMeDurationInput || !findMeFromModalBtn) return;
+                const outputIndex = parseInt(nodeFindMeOutputInput.value, 10);
+                if (isNaN(outputIndex) || outputIndex < 0 || outputIndex > 48) {
+                    alert('Enter Find Me output index (ESP32-S3 GPIO) 0–48.');
+                    return;
+                }
+                let duration = parseInt(nodeFindMeDurationInput.value, 10);
+                if (isNaN(duration) || duration < 1) duration = 1;
+                if (duration > 30) duration = 30;
+                nodeFindMeDurationInput.value = duration;
+                const origText = findMeFromModalBtn.textContent;
+                findMeFromModalBtn.textContent = 'Sending...';
+                findMeFromModalBtn.disabled = true;
+                try {
+                    const response1 = await fetch('/api/node/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            target_node_id: currentConfiguringNodeId,
+                            command: 'set_find_me_output',
+                            output_index: outputIndex
+                        })
+                    });
+                    if (!response1.ok) throw new Error(await response1.text());
+                    const response2 = await fetch('/api/node/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            target_node_id: currentConfiguringNodeId,
+                            command: 'find_me',
+                            duration_min: duration
+                        })
+                    });
+                    if (!response2.ok) throw new Error(await response2.text());
+                    findMeFromModalBtn.textContent = 'Sent ' + duration + ' min';
+                    setTimeout(() => { findMeFromModalBtn.textContent = origText; findMeFromModalBtn.disabled = false; }, 2000);
+                } catch (error) {
+                    console.error('Find Me from modal:', error);
+                    alert('Error sending Find Me: ' + error.message);
+                    findMeFromModalBtn.textContent = origText;
+                    findMeFromModalBtn.disabled = false;
+                }
+            }
+
+            async function sendTimingToAllNodes() {
+                const btn = document.getElementById('sendTimingToAllBtn');
+                const clickMaxEl = document.getElementById('timingClickMax');
+                const dblGapEl = document.getElementById('timingDblGap');
+                const holdMinEl = document.getElementById('timingHoldMin');
+                const longHoldEl = document.getElementById('timingLongHold');
+                if (!btn || !clickMaxEl || !dblGapEl || !holdMinEl || !longHoldEl) return;
+                let clickMax = parseInt(clickMaxEl.value, 10);
+                let dblGap = parseInt(dblGapEl.value, 10);
+                let holdMin = parseInt(holdMinEl.value, 10);
+                let longHold = parseInt(longHoldEl.value, 10);
+                if (isNaN(clickMax) || clickMax < 0) clickMax = 500;
+                if (clickMax > 65535) clickMax = 65535;
+                if (isNaN(dblGap) || dblGap < 0) dblGap = 400;
+                if (dblGap > 65535) dblGap = 65535;
+                if (isNaN(holdMin) || holdMin < 0) holdMin = 800;
+                if (holdMin > 65535) holdMin = 65535;
+                if (isNaN(longHold) || longHold < 0) longHold = 200;
+                if (longHold > 255) longHold = 255;
+                const origText = btn.textContent;
+                btn.textContent = 'Sending...';
+                btn.disabled = true;
+                try {
+                    const nodesRes = await fetch('/api/nodes');
+                    if (!nodesRes.ok) throw new Error('Failed to fetch nodes');
+                    const nodes = await nodesRes.json();
+                    if (!nodes.length) {
+                        alert('No nodes in list. Refresh Nodes to discover nodes.');
+                        btn.textContent = origText;
+                        btn.disabled = false;
+                        return;
+                    }
+                    const body = {
+                        command: 'set_timing',
+                        click_max_ms: clickMax,
+                        double_click_gap_ms: dblGap,
+                        hold_min_ms: holdMin,
+                        long_hold_min_ms: longHold
+                    };
+                    let sent = 0;
+                    for (const node of nodes) {
+                        const nodeId = node.node_id;
+                        if (nodeId === undefined) continue;
+                        const res = await fetch('/api/node/config', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ target_node_id: nodeId, ...body })
+                        });
+                        if (res.ok) sent++;
+                    }
+                    btn.textContent = sent + ' node(s) updated';
+                    const modal = document.getElementById('nodeTimingModal');
+                    if (modal) setTimeout(() => { modal.classList.add('hidden'); }, 1500);
+                    setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000);
+                } catch (error) {
+                    console.error('Send timing to all:', error);
+                    alert('Error sending timing: ' + error.message);
+                    btn.textContent = origText;
+                    btn.disabled = false;
+                }
+            }
+
+            async function applyInputTypes() {
+                if (currentConfiguringNodeId === null || currentConfiguringNodeInputCount <= 0) return;
+                if (!applyInputTypesBtn) return;
+                const btnText = applyInputTypesBtn.querySelector('span') || applyInputTypesBtn;
+                const origText = btnText.textContent;
+                btnText.textContent = 'Applying...';
+                applyInputTypesBtn.disabled = true;
+                try {
+                    for (let i = 0; i < currentConfiguringNodeInputCount; i++) {
+                        const sel = document.querySelector(`.node-input-mode-select[data-input-index="${i}"]`);
+                        const labelInput = document.querySelector(`.node-input-label-input[data-input-index="${i}"]`);
+                        const gpioInput = document.querySelector(`.node-input-gpio-input[data-input-index="${i}"]`);
+                        const mode = sel ? parseInt(sel.value, 10) : 0;
+                        const label = (labelInput && labelInput.value) ? String(labelInput.value).trim() : '';
+                        let gpio = 255;
+                        if (gpioInput && gpioInput.value.trim() !== '') {
+                            const g = parseInt(gpioInput.value.trim(), 10);
+                            if (!isNaN(g) && g >= 0 && g <= 48) gpio = g;
+                        }
+                        const body = {
+                            target_node_id: currentConfiguringNodeId,
+                            command: 'set_input_cfg',
+                            input_index: i,
+                            input_id: i + 1,
+                            mode: mode,
+                            label: label
+                        };
+                        if (currentConfiguringNodeType === 2) body.gpio = gpio;
+                        const response = await fetch('/api/node/config', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body)
+                        });
+                        if (!response.ok) throw new Error(await response.text());
+                    }
+                    btnText.textContent = 'Saved';
+                    setTimeout(() => { btnText.textContent = origText; applyInputTypesBtn.disabled = false; }, 1500);
+                    loadNodeInputTypes(currentConfiguringNodeId);
+                } catch (error) {
+                    console.error('Apply input types:', error);
+                    alert('Error applying input types: ' + error.message);
+                    btnText.textContent = origText;
+                    applyInputTypesBtn.disabled = false;
+                }
+            }
+
+            function cancelNodeConfig() {
+                if (nodeConfigModal) nodeConfigModal.classList.add('hidden');
+                currentConfiguringNodeId = null;
+                currentConfiguringNodeInputCount = 0;
+                currentConfiguringNodeType = 0;
+                if (newNodeId) newNodeId.value = '';
+            }
+
+            async function confirmNodeConfig() {
+                if (currentConfiguringNodeId === null) return;
+                const newId = parseInt(newNodeId.value);
+                if (isNaN(newId) || newId < 1 || newId > 126) {
+                    alert('Please enter a valid node ID between 1 and 126');
+                    return;
+                }
+
+                // Check that the new node ID is not already in use by another node
+                try {
+                    const nodesRes = await fetch('/api/nodes');
+                    if (nodesRes.ok) {
+                        const nodes = await nodesRes.json();
+                        const inUse = nodes.some(n => n.node_id === newId);
+                        if (inUse && currentConfiguringNodeId !== newId) {
+                            alert(`Node ID ${newId} is already in use. Choose a different ID.`);
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Could not validate node ID availability', e);
+                }
+
+                try {
+                    const response = await fetch('/api/node/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            target_node_id: currentConfiguringNodeId,
+                            command: 'set_node_id',
+                            new_id: newId
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(errorText || 'Failed to configure node');
+                    }
+
+                    cancelNodeConfig(); // Close modal and reset state
+                    setTimeout(fetchNodes, 2000);
+                } catch (error) {
+                    console.error('Error configuring node:', error);
+                    alert('Error configuring node: ' + error.message);
+                }
+            }
+
+            async function removeNode(nodeId, event) {
+                if (!confirm('Remove node ' + nodeId + ' from the list? This only removes it from the hub; the device can re-appear if it sends a heartbeat.')) {
+                    return;
+                }
+                try {
+                    const response = await fetch('/api/node/remove', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ node_id: nodeId })
+                    });
+
+                    if (!response.ok) {
+                        const text = await response.text();
+                        throw new Error(text || response.statusText);
+                    }
+                    await fetchNodes();
+                } catch (error) {
+                    console.error('Error removing node:', error);
+                    alert('Error removing node: ' + error.message);
+                }
             }
 
             function addGroup(name = '', groupData = { outputs: [], staggerEnabled: false }) {
@@ -750,7 +1686,7 @@
                 }
                 const configToSave = {
                     settings: {
-                        groupStaggerMs: parseInt(document.getElementById('groupStaggerMs').value, 10) || 0
+                        groupStaggerMs: parseInt(document.getElementById('groupStaggerMs').value, 10) || 0,
                     },
                     wifi: {
                         ssid: wifiSsid.value.trim(),
@@ -853,14 +1789,25 @@
             }
 
             async function sendCommand() {
-                const target = commandTargetInput.value.trim();
-                const value = commandValueInput.value.trim();
-                const fadeValue = fadeInput.value.trim();
-                if (!target || !value) return showStatus('Please enter a target and a value.', 'error');
-                
+                const targetVal = commandTargetSelect && commandTargetSelect.value ? commandTargetSelect.value.trim() : '';
+                if (!targetVal) return showStatus('Please select a target (Output or Group).', 'error');
+                const state = commandStateSelect && commandStateSelect.value ? commandStateSelect.value : 'ON';
+                const fadeValue = fadeInput && fadeInput.value ? fadeInput.value.trim() : '';
+
                 let command = {};
-                isNaN(parseInt(target, 10)) ? command.group = target : command.output = parseInt(target, 10);
-                isNaN(parseInt(value, 10)) ? command.state = value.toUpperCase() : command.brightness = parseInt(value, 10);
+                if (targetVal.startsWith('o:')) {
+                    command.output = parseInt(targetVal.slice(2), 10);
+                    if (isNaN(command.output)) return showStatus('Invalid target.', 'error');
+                } else if (targetVal.startsWith('g:')) {
+                    command.group = targetVal.slice(2);
+                } else {
+                    return showStatus('Please select a target.', 'error');
+                }
+                command.state = state;
+                if (commandUseBrightness && commandUseBrightness.checked && commandBrightness) {
+                    const b = parseInt(commandBrightness.value, 10);
+                    if (!isNaN(b)) command.brightness = Math.min(100, Math.max(0, b));
+                }
                 if (fadeValue) command.fade = parseInt(fadeValue, 10);
 
                 setLoadingState(sendCommandBtn, sendCommandBtnText, sendCommandSpinner, true);
@@ -879,6 +1826,36 @@
                 } finally {
                     setLoadingState(sendCommandBtn, sendCommandBtnText, sendCommandSpinner, false);
                 }
+            }
+
+            function populateCommandTargetSelect() {
+                const sel = commandTargetSelect;
+                if (!sel) return;
+                sel.innerHTML = '<option value="">— Select target —</option>';
+                const groups = currentConfig && currentConfig.groups ? currentConfig.groups : {};
+                const availableOutputs = getAvailableOutputs();
+                for (const outputId of availableOutputs) {
+                    const opt = document.createElement('option');
+                    opt.value = 'o:' + outputId;
+                    opt.textContent = 'Output ' + outputId;
+                    sel.appendChild(opt);
+                }
+                for (const name of Object.keys(groups)) {
+                    const opt = document.createElement('option');
+                    opt.value = 'g:' + name;
+                    opt.textContent = "Group '" + name + "'";
+                    sel.appendChild(opt);
+                }
+                if (commandBrightness) updateBrightnessSliderFill(commandBrightness);
+            }
+
+            function updateBrightnessSliderFill(sliderEl) {
+                if (!sliderEl || typeof sliderEl.value === 'undefined') return;
+                const w = sliderEl.value + '%';
+                const glow = sliderEl.previousElementSibling;
+                const fill = glow && glow.previousElementSibling ? glow.previousElementSibling : sliderEl.previousElementSibling;
+                if (fill && fill.classList && fill.classList.contains('brightness-slider-fill')) fill.style.width = w;
+                if (glow && glow.classList && glow.classList.contains('brightness-slider-glow')) glow.style.width = w;
             }
 
             async function refreshCanHistory() {

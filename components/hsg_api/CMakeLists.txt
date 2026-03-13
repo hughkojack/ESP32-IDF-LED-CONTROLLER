@@ -14,7 +14,7 @@ idf_component_register(
         esp_netif
         esp_wifi
 )
-# Embed your HTML file as binary
-target_add_binary_data(${COMPONENT_TARGET} "ESP32-POE.html" TEXT)
+# Embed your HTML file as binary (path relative to this component)
+target_add_binary_data(${COMPONENT_TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/ESP32-POE.html" TEXT)
 target_add_binary_data(${COMPONENT_TARGET} favicon.ico BINARY)
 target_add_binary_data(${COMPONENT_TARGET} "control.html" TEXT)

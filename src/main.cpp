@@ -13,6 +13,7 @@ extern "C" {
 #include <cstring>
 #include <string>
 #include <vector>
+#include <map>
 #include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -44,6 +45,8 @@ extern "C" {
 #include "hsg_outputs.h"
 #include "hsg_pca9685.h"
 #include "esp_task_wdt.h"
+#include "esp_timer.h"
+#include <ctime>
 //#include "sdkconfig.h"
 
 static const char *TAG = "MAIN";
@@ -65,6 +68,7 @@ static spi_device_handle_t can_spi_handle;
 static MCP2515* mcp2515_ptr = nullptr;
 static QueueHandle_t gpio_evt_queue = nullptr;
 static QueueHandle_t can_message_queue = nullptr;
+static SemaphoreHandle_t g_can_send_mutex = nullptr;
 
 // --- Application Structs & Data ---
 enum class TargetType { OUTPUT, GROUP };
@@ -92,6 +96,40 @@ struct Binding {
 // A vector to hold all the rules loaded from config
 static std::vector<Binding> g_bindings;
 
+// Node tracking structure
+#define MAX_INPUTS_PER_NODE 6  // inputs per node 1..6
+#define MAX_INPUT_LABEL_LEN 24
+struct NodeInfo {
+    uint8_t node_id;
+    uint8_t node_type;  // NODE_TYPE_LCD or NODE_TYPE_MECHANICAL
+    uint8_t input_count;
+    int64_t last_seen_timestamp_us;  // microseconds since boot
+    bool is_configured;  // true if node_id != NODE_ID_UNCONFIGURED
+    // Per-input switch type: 0 = momentary, 1 = toggle, 0xFF = unset (default momentary)
+    uint8_t input_modes[MAX_INPUTS_PER_NODE];
+    // Per-input label from web UI (for LCD display)
+    char input_labels[MAX_INPUTS_PER_NODE][MAX_INPUT_LABEL_LEN + 1];
+    // Per-input GPIO (mechanical node); 0xFF = not assigned
+    uint8_t input_gpio[MAX_INPUTS_PER_NODE];
+    // Output index (0-255) used by node for Find Me blink; 0xFF = unset (node default)
+    uint8_t find_me_output_index;
+
+    NodeInfo() : node_id(0), node_type(0), input_count(0), last_seen_timestamp_us(0), is_configured(false), find_me_output_index(0xFF) {
+        for (int i = 0; i < MAX_INPUTS_PER_NODE; i++) {
+            input_modes[i] = 0xFF;
+            input_labels[i][0] = '\0';
+            input_gpio[i] = 0xFF;
+        }
+    }
+};
+
+// Node registry: map from node_id to NodeInfo
+static std::map<uint8_t, NodeInfo> g_nodes;
+static SemaphoreHandle_t g_nodes_mutex = nullptr;
+// When user sends set_node_id(old_id, new_id), we record here; when HEARTBEAT from new_id is seen, remove old_id permanently.
+static std::map<uint8_t, uint8_t> g_pending_reconfig_old_id;  // key = new_id, value = old_id
+static SemaphoreHandle_t g_pending_reconfig_mutex = nullptr;
+
 struct OutputState {
     int startPwmValue = 0;
     int currentPwmValue = 0;
@@ -106,6 +144,12 @@ int outputBrightness[MAX_OUTPUTS] = {0}; // Last "ON" brightness (0-100)
 static can_frame g_last_frame = {};
 static SemaphoreHandle_t g_bindings_mutex;
 
+// Node registry functions (forward declarations)
+static void load_nodes_from_config(void);
+static void save_nodes_to_config(void);
+// Run save in a one-shot task so CAN task does not block on NVS (avoids watchdog trigger)
+static void defer_save_nodes_to_config(void);
+
 //-----------------------------------------------------------------------
 
 /*--------------------------- Function Declarations ---------------------------*/
@@ -116,6 +160,10 @@ void can_processing_task(void *pvParameter);
 static void IRAM_ATTR gpio_isr_handler(void* arg);
 static void wifi_start(void);
 void setOutput(int output, int brightness, int fadeMs, unsigned long startTimeOffset = 0);
+static void send_node_config(uint8_t target_node_id, uint8_t cmd, const uint8_t* data, size_t len);
+static void set_node_input_label_impl(uint8_t node_id, uint8_t input_index, const char* label);
+// Remove node from registry and persist; returns true if node was present and removed.
+static bool remove_node_from_registry(uint8_t node_id);
 static void w5500_hardware_reset();
 void set_esp32_mac_on_w5500(esp_eth_handle_t eth_handle);
 
@@ -186,12 +234,15 @@ void processCommand(const Command& cmd) {
     }
     
     int final_brightness = 0;
-    // If brightness is explicitly provided, it wins
-    if (cmd.brightness >= 0) {
+    // If brightness is explicitly provided and > 0, use it. If state is ON and brightness is 0, treat as "not set" and use default 50%.
+    if (cmd.brightness > 0) {
         final_brightness = cmd.brightness;
     }
+    else if (cmd.brightness == 0 && cmd.state == "OFF") {
+        final_brightness = 0;
+    }
     else if (cmd.state == "ON") {
-        final_brightness = 100;
+        final_brightness = 50;  // default when not specified (e.g. web UI "ON" with no brightness)
     } else if (cmd.state == "OFF") {
         final_brightness = 0;
     } else if (cmd.state == "TOGGLE") {
@@ -236,7 +287,7 @@ void processCommand(const Command& cmd) {
         }
 
         // Now, determine the final brightness based on the collective state
-        final_brightness = should_turn_on ? 100 : 0;
+        final_brightness = should_turn_on ? 50 : 0;  // default on = 50% when not specified
     } else {
         // Nothing provided (shouldn't happen)
         final_brightness = 0;
@@ -694,7 +745,10 @@ void reload_bindings() {
     if (xSemaphoreTake(g_bindings_mutex, portMAX_DELAY) == pdTRUE) {
         g_bindings.clear();
         cJSON* config = HSG::API::get_config_json_obj();
-        if (!config) return;
+        if (!config) {
+            xSemaphoreGive(g_bindings_mutex);
+            return;
+        }
 
         // --- ADD THIS DIAGNOSTIC BLOCK ---
     /*    char* json_string = cJSON_Print(config); // cJSON_Print makes it nicely formatted
@@ -717,6 +771,10 @@ void reload_bindings() {
                 b.switchId = cJSON_GetObjectItem(trigger, "switchId")->valueint;
                 b.button = cJSON_GetObjectItem(trigger, "button")->valueint;
                 b.onAction = cJSON_GetObjectItem(trigger, "action")->valuestring;
+                if (!isEventActionString(b.onAction)) {
+                    ESP_LOGW(TAG, "Binding has unsupported CAN trigger action '%s' (supported: CLICK/HOLD/DOUBLE_CLICK/TRIPLE_CLICK/LONG_HOLD/HOLD_REPEAT)",
+                             b.onAction.c_str());
+                }
 
                 // Parse Action
                 cJSON* action = cJSON_GetObjectItem(rule_json, "action");
@@ -734,12 +792,317 @@ void reload_bindings() {
                 g_bindings.push_back(b);
             }
         }
+
         cJSON_Delete(config);
         ESP_LOGI(TAG, "Loaded %d CAN bindings", g_bindings.size());
         xSemaphoreGive(g_bindings_mutex);
     }
 }
 
+static void load_nodes_from_config(void) {
+    if (!g_nodes_mutex) {
+        ESP_LOGE(TAG, "load_nodes_from_config: g_nodes_mutex not initialized");
+        return;
+    }
+    
+    if (xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
+        g_nodes.clear();
+        cJSON* config = HSG::API::get_config_json_obj();
+        if (!config) {
+            xSemaphoreGive(g_nodes_mutex);
+            return;
+        }
+
+        cJSON* nodes_json = cJSON_GetObjectItem(config, "nodes");
+        if (cJSON_IsArray(nodes_json)) {
+            cJSON* node_json = NULL;
+            cJSON_ArrayForEach(node_json, nodes_json) {
+                NodeInfo node;
+                cJSON* item = cJSON_GetObjectItem(node_json, "node_id");
+                if (!item || !cJSON_IsNumber(item)) continue;
+                node.node_id = (uint8_t)item->valueint;
+                
+                item = cJSON_GetObjectItem(node_json, "node_type");
+                node.node_type = (item && cJSON_IsNumber(item)) ? (uint8_t)item->valueint : 0;
+                
+                item = cJSON_GetObjectItem(node_json, "input_count");
+                node.input_count = (item && cJSON_IsNumber(item)) ? (uint8_t)item->valueint : 0;
+                
+                // Do not restore last_seen from config: it was "microseconds since boot" and is
+                // meaningless after reboot. Nodes show offline until they send a HEARTBEAT.
+                node.last_seen_timestamp_us = 0;
+                
+                item = cJSON_GetObjectItem(node_json, "is_configured");
+                node.is_configured = (item && cJSON_IsBool(item)) ? cJSON_IsTrue(item) : (node.node_id != NODE_ID_UNCONFIGURED);
+
+                cJSON* input_config = cJSON_GetObjectItem(node_json, "input_config");
+                if (cJSON_IsArray(input_config)) {
+                    cJSON* entry = NULL;
+                    cJSON_ArrayForEach(entry, input_config) {
+                        cJSON* idx = cJSON_GetObjectItem(entry, "input_index");
+                        cJSON* mode_item = cJSON_GetObjectItem(entry, "mode");
+                        cJSON* label_item = cJSON_GetObjectItem(entry, "label");
+                        cJSON* gpio_item = cJSON_GetObjectItem(entry, "gpio");
+                        if (cJSON_IsNumber(idx) && idx->valueint >= 0 && idx->valueint < MAX_INPUTS_PER_NODE) {
+                            if (cJSON_IsNumber(mode_item))
+                                node.input_modes[idx->valueint] = (uint8_t)(mode_item->valueint & 1);
+                            if (cJSON_IsString(label_item) && label_item->valuestring) {
+                                strncpy(node.input_labels[idx->valueint], label_item->valuestring, MAX_INPUT_LABEL_LEN);
+                                node.input_labels[idx->valueint][MAX_INPUT_LABEL_LEN] = '\0';
+                            }
+                            if (cJSON_IsNumber(gpio_item) && ((gpio_item->valueint >= 0 && gpio_item->valueint <= 48) || gpio_item->valueint == 255))
+                                node.input_gpio[idx->valueint] = (uint8_t)(gpio_item->valueint & 0xFF);
+                        }
+                    }
+                }
+                item = cJSON_GetObjectItem(node_json, "find_me_output_index");
+                if (item && cJSON_IsNumber(item)) node.find_me_output_index = (uint8_t)(item->valueint & 0xFF);
+
+                g_nodes[node.node_id] = node;
+            }
+        }
+
+        cJSON_Delete(config);
+        ESP_LOGI(TAG, "Loaded %d nodes from config", (int)g_nodes.size());
+        xSemaphoreGive(g_nodes_mutex);
+    }
+}
+
+static void save_nodes_to_config(void) {
+    if (!g_nodes_mutex) {
+        ESP_LOGE(TAG, "save_nodes_to_config: g_nodes_mutex not initialized");
+        return;
+    }
+    
+    if (xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
+        // Get the config object (this returns just the "config" part, not the root)
+        cJSON* config = HSG::API::get_config_json_obj();
+        if (!config) {
+            xSemaphoreGive(g_nodes_mutex);
+            return;
+        }
+
+        // Get or create nodes array
+        cJSON* nodes_json = cJSON_GetObjectItem(config, "nodes");
+        if (!nodes_json || !cJSON_IsArray(nodes_json)) {
+            cJSON_DeleteItemFromObject(config, "nodes");
+            nodes_json = cJSON_CreateArray();
+            cJSON_AddItemToObject(config, "nodes", nodes_json);
+        } else {
+            // Clear existing array by deleting all items
+            while (cJSON_GetArraySize(nodes_json) > 0) {
+                cJSON_DeleteItemFromArray(nodes_json, 0);
+            }
+        }
+
+        // Add all nodes to array
+        for (const auto& pair : g_nodes) {
+            const NodeInfo& node = pair.second;
+            cJSON* node_json = cJSON_CreateObject();
+            cJSON_AddNumberToObject(node_json, "node_id", node.node_id);
+            cJSON_AddNumberToObject(node_json, "node_type", node.node_type);
+            cJSON_AddNumberToObject(node_json, "input_count", node.input_count);
+            cJSON_AddNumberToObject(node_json, "last_seen", (double)node.last_seen_timestamp_us);
+            cJSON_AddBoolToObject(node_json, "is_configured", node.is_configured);
+            if (node.find_me_output_index != 0xFF)
+                cJSON_AddNumberToObject(node_json, "find_me_output_index", node.find_me_output_index);
+            int n_in = (node.input_count < MAX_INPUTS_PER_NODE) ? node.input_count : MAX_INPUTS_PER_NODE;
+            if (n_in > 0) {
+                cJSON* input_config = cJSON_CreateArray();
+                for (int i = 0; i < n_in; i++) {
+                    cJSON* entry = cJSON_CreateObject();
+                    cJSON_AddNumberToObject(entry, "input_index", i);
+                    cJSON_AddNumberToObject(entry, "input_id", i + 1);
+                    uint8_t m = (node.input_modes[i] == 0xFF) ? 0 : (node.input_modes[i] & 1);
+                    cJSON_AddNumberToObject(entry, "mode", m);
+                    if (node.input_labels[i][0] != '\0')
+                        cJSON_AddStringToObject(entry, "label", node.input_labels[i]);
+                    if (node.input_gpio[i] != 0xFF)
+                        cJSON_AddNumberToObject(entry, "gpio", node.input_gpio[i]);
+                    cJSON_AddItemToArray(input_config, entry);
+                }
+                cJSON_AddItemToObject(node_json, "input_config", input_config);
+            }
+            cJSON_AddItemToArray(nodes_json, node_json);
+        }
+
+        // Convert to string and save using public API
+        char* json_string = cJSON_PrintUnformatted(config);
+        if (json_string) {
+            HSG::API::set_config_json(json_string);
+            free(json_string);
+        }
+
+        cJSON_Delete(config);
+        xSemaphoreGive(g_nodes_mutex);
+    }
+}
+
+static void save_nodes_task_fn(void* pv) {
+    save_nodes_to_config();
+    vTaskDelete(NULL);
+}
+
+static void defer_save_nodes_to_config(void) {
+    xTaskCreate(save_nodes_task_fn, "save_nodes", 4096, NULL, 1, NULL);
+}
+
+// Returns JSON array of g_nodes only (persistable format). Used by config POST so we never re-save removed nodes from stale NVS.
+static cJSON* get_nodes_json_for_config_save(void) {
+    cJSON* root = cJSON_CreateArray();
+    if (!root) return nullptr;
+    if (!g_nodes_mutex) return root;
+    if (xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) != pdTRUE) return root;
+    for (const auto& pair : g_nodes) {
+        const NodeInfo& node = pair.second;
+        cJSON* node_json = cJSON_CreateObject();
+        cJSON_AddNumberToObject(node_json, "node_id", node.node_id);
+        cJSON_AddNumberToObject(node_json, "node_type", node.node_type);
+        cJSON_AddNumberToObject(node_json, "input_count", node.input_count);
+        cJSON_AddNumberToObject(node_json, "last_seen", (double)node.last_seen_timestamp_us);
+        cJSON_AddBoolToObject(node_json, "is_configured", node.is_configured);
+        if (node.find_me_output_index != 0xFF)
+            cJSON_AddNumberToObject(node_json, "find_me_output_index", node.find_me_output_index);
+        int n_in = (node.input_count < MAX_INPUTS_PER_NODE) ? node.input_count : MAX_INPUTS_PER_NODE;
+        if (n_in > 0) {
+            cJSON* input_config = cJSON_CreateArray();
+            for (int i = 0; i < n_in; i++) {
+                cJSON* entry = cJSON_CreateObject();
+                cJSON_AddNumberToObject(entry, "input_index", i);
+                cJSON_AddNumberToObject(entry, "input_id", i + 1);
+                uint8_t m = (node.input_modes[i] == 0xFF) ? 0 : (node.input_modes[i] & 1);
+                cJSON_AddNumberToObject(entry, "mode", m);
+                if (node.input_labels[i][0] != '\0')
+                    cJSON_AddStringToObject(entry, "label", node.input_labels[i]);
+                if (node.input_gpio[i] != 0xFF)
+                    cJSON_AddNumberToObject(entry, "gpio", node.input_gpio[i]);
+                cJSON_AddItemToArray(input_config, entry);
+            }
+            cJSON_AddItemToObject(node_json, "input_config", input_config);
+        }
+        cJSON_AddItemToArray(root, node_json);
+    }
+    xSemaphoreGive(g_nodes_mutex);
+    return root;
+}
+
+// Function to get nodes as JSON array (for API access)
+// Returns union of nodes from config (NVS) and live g_nodes so the list is never missing a node that was saved or recently seen.
+static cJSON* get_nodes_json(void) {
+    cJSON* root = cJSON_CreateArray();
+    if (!root) return nullptr;
+    
+    std::map<uint8_t, NodeInfo> merged;
+    
+    // 1) Load nodes from config so we include any node that was saved (e.g. after reconfig) even if not yet seen this boot
+    cJSON* config = HSG::API::get_config_json_obj();
+    if (config) {
+        cJSON* nodes_json = cJSON_GetObjectItem(config, "nodes");
+        if (cJSON_IsArray(nodes_json)) {
+            cJSON* node_json = NULL;
+            cJSON_ArrayForEach(node_json, nodes_json) {
+                NodeInfo node;
+                cJSON* item = cJSON_GetObjectItem(node_json, "node_id");
+                if (!item || !cJSON_IsNumber(item)) continue;
+                node.node_id = (uint8_t)item->valueint;
+                item = cJSON_GetObjectItem(node_json, "node_type");
+                node.node_type = (item && cJSON_IsNumber(item)) ? (uint8_t)item->valueint : 0;
+                item = cJSON_GetObjectItem(node_json, "input_count");
+                node.input_count = (item && cJSON_IsNumber(item)) ? (uint8_t)item->valueint : 0;
+                node.last_seen_timestamp_us = 0;
+                item = cJSON_GetObjectItem(node_json, "is_configured");
+                node.is_configured = (item && cJSON_IsBool(item)) ? cJSON_IsTrue(item) : (node.node_id != NODE_ID_UNCONFIGURED);
+                cJSON* input_config = cJSON_GetObjectItem(node_json, "input_config");
+                if (cJSON_IsArray(input_config)) {
+                    cJSON* entry = NULL;
+                    cJSON_ArrayForEach(entry, input_config) {
+                        cJSON* idx = cJSON_GetObjectItem(entry, "input_index");
+                        cJSON* mode_item = cJSON_GetObjectItem(entry, "mode");
+                        cJSON* label_item = cJSON_GetObjectItem(entry, "label");
+                        cJSON* gpio_item = cJSON_GetObjectItem(entry, "gpio");
+                        if (cJSON_IsNumber(idx) && idx->valueint >= 0 && idx->valueint < MAX_INPUTS_PER_NODE) {
+                            if (cJSON_IsNumber(mode_item))
+                                node.input_modes[idx->valueint] = (uint8_t)(mode_item->valueint & 1);
+                            if (cJSON_IsString(label_item) && label_item->valuestring) {
+                                strncpy(node.input_labels[idx->valueint], label_item->valuestring, MAX_INPUT_LABEL_LEN);
+                                node.input_labels[idx->valueint][MAX_INPUT_LABEL_LEN] = '\0';
+                            }
+                            if (cJSON_IsNumber(gpio_item) && ((gpio_item->valueint >= 0 && gpio_item->valueint <= 48) || gpio_item->valueint == 255))
+                                node.input_gpio[idx->valueint] = (uint8_t)(gpio_item->valueint & 0xFF);
+                        }
+                    }
+                }
+                item = cJSON_GetObjectItem(node_json, "find_me_output_index");
+                if (item && cJSON_IsNumber(item)) node.find_me_output_index = (uint8_t)(item->valueint & 0xFF);
+                merged[node.node_id] = node;
+            }
+        }
+        cJSON_Delete(config);
+    }
+    
+    // 2) Overlay live g_nodes (so recently seen nodes have correct last_seen and status)
+    if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
+        for (const auto& pair : g_nodes)
+            merged[pair.first] = pair.second;
+        xSemaphoreGive(g_nodes_mutex);
+    }
+    
+    int64_t current_time_us = esp_timer_get_time();
+    const int64_t ONLINE_THRESHOLD_US = 30 * 1000000; // 30 seconds
+    const int64_t STALE_UNCONFIGURED_THRESHOLD_US = 60 * 1000000; // 60 seconds
+    
+    for (const auto& pair : merged) {
+        const NodeInfo& node = pair.second;
+        int64_t time_since_seen = current_time_us - node.last_seen_timestamp_us;
+        
+        // Only skip stale unconfigured nodes (127) offline > 60s. Include all configured nodes so the list never hides an active node.
+        if (node.node_id == NODE_ID_UNCONFIGURED) {
+            if (node.last_seen_timestamp_us > 0 && time_since_seen > STALE_UNCONFIGURED_THRESHOLD_US)
+                continue;
+        }
+        // Configured nodes: always include (no 1-hour filter). UI shows online/offline from last_seen.
+        
+        cJSON* node_json = cJSON_CreateObject();
+        if (!node_json) continue;
+        
+        cJSON_AddNumberToObject(node_json, "node_id", node.node_id);
+        cJSON_AddNumberToObject(node_json, "node_type", node.node_type);
+        cJSON_AddNumberToObject(node_json, "input_count", node.input_count);
+        cJSON_AddNumberToObject(node_json, "last_seen", (double)node.last_seen_timestamp_us);
+        int64_t ago_ms = (time_since_seen > 0) ? (time_since_seen / 1000) : 0;
+        cJSON_AddNumberToObject(node_json, "last_seen_ago_ms", (double)ago_ms);
+        cJSON_AddBoolToObject(node_json, "is_configured", node.is_configured);
+        bool is_online = time_since_seen < ONLINE_THRESHOLD_US;
+        cJSON_AddStringToObject(node_json, "status", is_online ? "online" : "offline");
+        const char* type_str = (node.node_type == NODE_TYPE_LCD) ? "LCD" : 
+                               (node.node_type == NODE_TYPE_MECHANICAL) ? "mechanical" : "unknown";
+        cJSON_AddStringToObject(node_json, "type_string", type_str);
+        if (node.find_me_output_index != 0xFF)
+            cJSON_AddNumberToObject(node_json, "find_me_output_index", node.find_me_output_index);
+
+        int n_in = (node.input_count < MAX_INPUTS_PER_NODE) ? node.input_count : MAX_INPUTS_PER_NODE;
+        if (n_in > 0) {
+            cJSON* input_config = cJSON_CreateArray();
+            for (int i = 0; i < n_in; i++) {
+                cJSON* entry = cJSON_CreateObject();
+                cJSON_AddNumberToObject(entry, "input_index", i);
+                cJSON_AddNumberToObject(entry, "input_id", i + 1);
+                uint8_t m = (node.input_modes[i] == 0xFF) ? 0 : (node.input_modes[i] & 1);
+                cJSON_AddNumberToObject(entry, "mode", m);
+                if (node.input_labels[i][0] != '\0')
+                    cJSON_AddStringToObject(entry, "label", node.input_labels[i]);
+                if (node.input_gpio[i] != 0xFF)
+                    cJSON_AddNumberToObject(entry, "gpio", node.input_gpio[i]);
+                cJSON_AddItemToArray(input_config, entry);
+            }
+            cJSON_AddItemToObject(node_json, "input_config", input_config);
+        }
+
+        cJSON_AddItemToArray(root, node_json);
+    }
+    
+    return root;
+}
 
 
 /*--------------------------- Main Application Entry Point --------------------*/
@@ -779,7 +1142,22 @@ extern "C" void app_main(void) {
     api_init.get_outputs_json_cb = [](){
         return get_current_outputs_json();
     };
+    api_init.get_nodes_json_cb = [](){
+        return get_nodes_json();
+    };
+    api_init.get_nodes_json_for_config_save_cb = [](){
+        return get_nodes_json_for_config_save();
+    };
     api_init.config_updated_cb = reload_bindings;
+    api_init.send_node_config_cb = [](uint8_t target_node_id, uint8_t cmd, const uint8_t* data, size_t len) {
+        send_node_config(target_node_id, cmd, data, len);
+    };
+    api_init.remove_node_cb = [](uint8_t node_id) {
+        return remove_node_from_registry(node_id);
+    };
+    api_init.set_node_input_label_cb = [](uint8_t node_id, uint8_t input_index, const char* label) {
+        set_node_input_label_impl(node_id, input_index, label ? label : "");
+    };
 
     HSG::API::start(api_init);
     HSG::API::mqtt_start();
@@ -796,7 +1174,13 @@ extern "C" void app_main(void) {
     cJSON_Delete(initial_config); // Clean up
 
     g_bindings_mutex = xSemaphoreCreateMutex();
+    g_nodes_mutex = xSemaphoreCreateMutex();
+    g_pending_reconfig_mutex = xSemaphoreCreateMutex();
+    g_can_send_mutex = xSemaphoreCreateMutex();
     can_message_queue = xQueueCreate(30, sizeof(can_frame)); // Buffer for 30 CAN frames
+
+    // Load nodes from config
+    load_nodes_from_config();
 
     ESP_LOGI(TAG, "app_main() Initialization complete.");
     
@@ -848,6 +1232,179 @@ bool initialize_mcp2515_with_retry() {
     return false;
 }
 
+// Remove node from registry and persist; returns true if node was present and removed.
+static bool remove_node_from_registry(uint8_t node_id) {
+    if (node_id < 1 || node_id > 127) return false;
+    if (!g_nodes_mutex) return false;
+    bool removed = false;
+    if (xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
+        auto it = g_nodes.find(node_id);
+        if (it != g_nodes.end()) {
+            g_nodes.erase(it);
+            removed = true;
+            ESP_LOGI(TAG, "remove_node: removed node %u from registry", (unsigned)node_id);
+        }
+        xSemaphoreGive(g_nodes_mutex);
+        if (removed)
+            save_nodes_to_config();
+    }
+    return removed;
+}
+
+// Update node input label in registry, persist, and send CMD_SET_INPUT_LABEL to node (multi-frame if len>5).
+// CAN frame is cmd(1) + payload(7) = 8 bytes max, so we send at most 5 chars per frame (idx, total_len|0xFF, 5 chars).
+static void set_node_input_label_impl(uint8_t node_id, uint8_t input_index, const char* label) {
+    if (input_index >= MAX_INPUTS_PER_NODE) return;
+    size_t label_len = label ? strnlen(label, MAX_INPUT_LABEL_LEN + 1) : 0;
+    if (label_len > MAX_INPUT_LABEL_LEN) label_len = MAX_INPUT_LABEL_LEN;
+
+    if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
+        auto it = g_nodes.find(node_id);
+        if (it != g_nodes.end()) {
+            memset(it->second.input_labels[input_index], 0, MAX_INPUT_LABEL_LEN + 1);
+            if (label_len > 0 && label)
+                memcpy(it->second.input_labels[input_index], label, label_len);
+        }
+        xSemaphoreGive(g_nodes_mutex);
+        defer_save_nodes_to_config();
+    }
+
+    if (!mcp2515_ptr || !g_can_send_mutex) return;
+    const size_t chunk = 5;  // 5 chars per frame (payload 7 bytes: idx, seg, c0..c4)
+    uint8_t payload[7];
+    for (size_t offset = 0; offset < label_len || offset == 0; offset += chunk) {
+        payload[0] = input_index;
+        payload[1] = (offset == 0) ? (uint8_t)label_len : (uint8_t)0xFF;
+        size_t n = 0;
+        for (; n < chunk && offset + n < label_len && label; n++)
+            payload[2 + n] = (uint8_t)label[offset + n];
+        for (; n < chunk; n++)
+            payload[2 + n] = 0;
+        send_node_config(node_id, CMD_SET_INPUT_LABEL, payload, sizeof(payload));
+        if (label_len == 0) break;
+    }
+}
+
+// Send NODE_STATE_FEEDBACK to one LCD node (payload: 4 bytes brightness 0-100 or 0xFF per button).
+static void send_node_state_feedback(uint8_t node_id, const uint8_t payload[4]) {
+    if (!mcp2515_ptr || !g_can_send_mutex) return;
+    can_frame frame = {};
+    frame.can_id = createCanId(NODE_STATE_FEEDBACK, node_id);
+    frame.can_dlc = 4;
+    memcpy(frame.data, payload, 4);
+    if (xSemaphoreTake(g_can_send_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        mcp2515_ptr->sendMessage(&frame);
+        xSemaphoreGive(g_can_send_mutex);
+    }
+}
+
+// Build per-button brightness for one LCD node from bindings and output state; send NODE_STATE_FEEDBACK (throttled).
+static void maybe_send_feedback_to_node(uint8_t node_id) {
+    static std::map<uint8_t, int64_t> s_last_feedback_us;
+    const int64_t throttle_us = 200 * 1000;
+    int64_t now = esp_timer_get_time();
+    auto it = s_last_feedback_us.find(node_id);
+    if (it != s_last_feedback_us.end() && (now - it->second) < throttle_us)
+        return;
+    s_last_feedback_us[node_id] = now;
+
+    uint8_t payload[4] = { 0xFF, 0xFF, 0xFF, 0xFF };
+    if (xSemaphoreTake(g_bindings_mutex, pdMS_TO_TICKS(50)) != pdTRUE) return;
+    for (int btn = 1; btn <= 4; btn++) {
+        for (const auto& rule : g_bindings) {
+            if (rule.switchId == (int)node_id && rule.button == btn && rule.onAction == "CLICK" && rule.targetType == TargetType::OUTPUT) {
+                int oid = rule.outputId;
+                if (oid >= 1 && oid <= MAX_OUTPUTS) {
+                    int idx = oid - 1;
+                    if (outputs[idx].targetPwmValue == 0)
+                        payload[btn - 1] = 0;  // off or fading to off: show 0 so node is not overwritten
+                    else
+                        payload[btn - 1] = (uint8_t)(outputBrightness[idx] <= 100 ? outputBrightness[idx] : (int)(outputs[idx].currentPwmValue * 100 / 4095));
+                }
+                break;
+            }
+        }
+    }
+    xSemaphoreGive(g_bindings_mutex);
+    send_node_state_feedback(node_id, payload);
+}
+
+static void send_node_config(uint8_t target_node_id, uint8_t cmd, const uint8_t* data, size_t len) {
+    if (!mcp2515_ptr) {
+        ESP_LOGW(TAG, "send_node_config: CAN not available");
+        return;
+    }
+    size_t payload_len = (len > 7) ? 7 : len;
+    can_frame frame = {};
+    frame.can_id = createCanId(NODE_CONFIG, target_node_id);
+    frame.can_dlc = (uint8_t)(1 + payload_len);
+    frame.data[0] = cmd;
+    if (data && payload_len > 0)
+        memcpy(&frame.data[1], data, payload_len);
+    if (g_can_send_mutex && xSemaphoreTake(g_can_send_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        MCP2515::ERROR err = mcp2515_ptr->sendMessage(&frame);
+        xSemaphoreGive(g_can_send_mutex);
+        if (err != MCP2515::ERROR_OK) {
+            ESP_LOGE(TAG, "send_node_config: send failed (target=%u cmd=0x%02X)", (unsigned)target_node_id, (unsigned)cmd);
+        } else {
+            ESP_LOGI(TAG, "send_node_config: sent target=%u cmd=0x%02X", (unsigned)target_node_id, (unsigned)cmd);
+
+            if (cmd == CMD_SET_INPUT_CFG && len >= 3 && data && data[0] < MAX_INPUTS_PER_NODE) {
+                if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
+                    auto it = g_nodes.find(target_node_id);
+                    if (it != g_nodes.end()) {
+                        it->second.input_modes[data[0]] = data[2] & 1;
+                        if (len >= 4)
+                            it->second.input_gpio[data[0]] = data[3];
+                        ESP_LOGI(TAG, "input_modes[%u]=%u for node %u", (unsigned)data[0], (unsigned)(data[2] & 1), (unsigned)target_node_id);
+                    }
+                    xSemaphoreGive(g_nodes_mutex);
+                    defer_save_nodes_to_config();
+                }
+            }
+
+            if (cmd == CMD_SET_INPUT_COUNT && len >= 1 && data) {
+                uint8_t count = data[0];
+                if (count >= 1 && count <= MAX_INPUTS_PER_NODE) {
+                    if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
+                        auto it = g_nodes.find(target_node_id);
+                        if (it != g_nodes.end()) {
+                            it->second.input_count = count;
+                            ESP_LOGI(TAG, "input_count=%u for node %u", (unsigned)count, (unsigned)target_node_id);
+                        }
+                        xSemaphoreGive(g_nodes_mutex);
+                        save_nodes_to_config();
+                    }
+                }
+            }
+
+            if (cmd == CMD_SET_FIND_ME_OUTPUT && len >= 1 && data) {
+                if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
+                    auto it = g_nodes.find(target_node_id);
+                    if (it != g_nodes.end()) {
+                        it->second.find_me_output_index = data[0];
+                        ESP_LOGI(TAG, "find_me_output_index=%u for node %u", (unsigned)data[0], (unsigned)target_node_id);
+                    }
+                    xSemaphoreGive(g_nodes_mutex);
+                    save_nodes_to_config();
+                }
+            }
+
+            // Record pending reconfig: remove old_id only after we receive HEARTBEAT with new_id
+            if (cmd == CMD_SET_NODE_ID && len >= 1) {
+                uint8_t new_id = data[0];
+                if (new_id >= 1 && new_id <= 126 && new_id != target_node_id) {
+                    if (g_pending_reconfig_mutex && xSemaphoreTake(g_pending_reconfig_mutex, portMAX_DELAY) == pdTRUE) {
+                        g_pending_reconfig_old_id[new_id] = target_node_id;
+                        ESP_LOGI(TAG, "Pending reconfig: will remove node %u when HEARTBEAT from node %u is received", (unsigned)target_node_id, (unsigned)new_id);
+                        xSemaphoreGive(g_pending_reconfig_mutex);
+                    }
+                }
+            }
+        }
+    }
+}
+
 void can_processing_task(void *pvParameter) {
     ESP_LOGI(TAG, "CAN Processing Task started.");
     
@@ -867,38 +1424,57 @@ void can_processing_task(void *pvParameter) {
         // 1. Wait here until one message arrives from the gateway task.
         if (xQueueReceive(can_message_queue, &frame, pdMS_TO_TICKS(5000))) {
 
+            // Protocol guard: this project only supports standard 11-bit data frames.
+            if (!isStandardDataFrame(frame.can_id)) {
+                ESP_LOGW(TAG, "Ignoring non-standard CAN frame (can_id=0x%lX)", frame.can_id);
+                continue;
+            }
+
             HSG_CanFrame api_frame;
             api_frame.id = frame.can_id;
             api_frame.dlc = frame.can_dlc;
             memcpy(api_frame.data, frame.data, frame.can_dlc);
             HSG::API::add_to_can_history(api_frame);
-            CanMessageType msgType = getMessageType(frame.can_id);
-            //for debugging
-            printf("Full CAN ID Received: 0x%lX\n", frame.can_id);
+            const uint16_t sid = getStandardId(frame.can_id);
+            CanMessageType msgType = getMessageType(sid);
+            uint8_t msgTypeValue = (uint8_t)msgType;
 
             if (msgType == LIGHTING_COMMAND) {
                 if (frame.can_dlc >= 2) {
-                    int switchId = getNodeId(frame.can_id);
+                    int switchId = getNodeId(sid);
                     int button = frame.data[0];
 
                     uint8_t evt = frame.data[1];
-                    const char* action = "UNKNOWN";
-
-                    // PRESS / RELEASE / LEVEL(+value)
-                    if (evt == 0x01) {
-                        action = "PRESS";
-                    } else if (evt == 0x02) {
-                        action = "RELEASE";
-                    } else if (evt == 0x03) {
-                        if (frame.can_dlc >= 3) {
-                            action = frame.data[2] ? "LEVEL_ON" : "LEVEL_OFF";
-                        } else {
-                            action = "LEVEL"; // (shouldn't happen, but safe)
-                        }
-                    }
+                    const char* action = decodeEventAction(evt);
                     bool matchFound = false;
                     Command cmd;
 
+                    // EVT_DIM: payload byte 2 = brightness 0..100; use same binding as CLICK for (node_id, button)
+                    if (evt == EVT_DIM && frame.can_dlc >= 3) {
+                        uint8_t brightness = frame.data[2];
+                        if (brightness > 100) brightness = 100;
+                        if (xSemaphoreTake(g_bindings_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                            for (const auto& rule : g_bindings) {
+                                if (rule.switchId == switchId && rule.button == button && strcmp(rule.onAction.c_str(), "CLICK") == 0) {
+                                    ESP_LOGI(TAG, "CAN DIM Match: Switch %d, Button %d, brightness=%u", switchId, button, (unsigned)brightness);
+                                    matchFound = true;
+                                    cmd.type = rule.targetType;
+                                    cmd.output_id = rule.outputId;
+                                    cmd.group_name = rule.groupName;
+                                    cmd.fade_ms = rule.fade_ms;
+                                    cmd.state = (brightness == 0) ? "OFF" : "ON";
+                                    cmd.brightness = (int)brightness;
+                                    break;
+                                }
+                            }
+                            xSemaphoreGive(g_bindings_mutex);
+                        }
+                        if (matchFound) {
+                            processCommand(cmd);
+                        } else {
+                            ESP_LOGW(TAG, "EVT_DIM: no CLICK binding for Switch %d Button %d", switchId, button);
+                        }
+                    } else {
                     if (xSemaphoreTake(g_bindings_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
                         for (const auto& rule : g_bindings) {
                             if (rule.switchId == switchId && rule.button == button && strcmp(rule.onAction.c_str(), action) == 0) {
@@ -922,11 +1498,103 @@ void can_processing_task(void *pvParameter) {
                     } else {
                         ESP_LOGW(TAG, "Received a valid lighting command for Switch ID %d (Button: %d), but NO matching binding was found in the configuration.", switchId, button);
                     }
+                    }
                 }
-            } else if (msgType == HEARTBEAT) {
-                uint8_t nodeId = getNodeId(frame.can_id);
-                // Use a more efficient log level for frequent messages
-                ESP_LOGD(TAG, "Heartbeat received from node 0x%02X", nodeId);
+            } else if (msgType == HEARTBEAT || msgTypeValue == 0x08) {
+                uint8_t nodeId = getNodeId(sid);
+                int64_t current_time_us = esp_timer_get_time();
+                ESP_LOGI(TAG, "HEARTBEAT received: nodeId=%u, DLC=%u, data[0]=0x%02X, data[1]=0x%02X, msgTypeValue=0x%02X", 
+                         (unsigned)nodeId, (unsigned)frame.can_dlc, frame.data[0], frame.data[1], msgTypeValue);
+                
+                if (frame.can_dlc >= 2) {
+                    uint8_t node_type = frame.data[0];
+                    uint8_t input_count = frame.data[1];
+                    const char* type_str = (node_type == NODE_TYPE_LCD) ? "LCD" : (node_type == NODE_TYPE_MECHANICAL) ? "mechanical" : "unknown";
+                    ESP_LOGI(TAG, "HEARTBEAT processing: nodeId=%u, type=%s (%u), input_count=%u", 
+                             (unsigned)nodeId, type_str, (unsigned)node_type, (unsigned)input_count);
+                    
+                    // Update node registry
+                    bool removed_stale = false;
+                    bool is_new = false;
+                    if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
+                        is_new = (g_nodes.find(nodeId) == g_nodes.end());
+                        NodeInfo& node = g_nodes[nodeId];
+                        node.node_id = nodeId;
+                        node.node_type = node_type;
+                        node.input_count = input_count;
+                        node.last_seen_timestamp_us = current_time_us;
+                        node.is_configured = (nodeId != NODE_ID_UNCONFIGURED);
+                        
+                        if (nodeId == NODE_ID_UNCONFIGURED) {
+                            if (is_new) {
+                                ESP_LOGI(TAG, "New unconfigured node on bus: type=%s (%u), input_count=%u (assign node ID via web)", type_str, (unsigned)node_type, (unsigned)input_count);
+                            }
+                        } else {
+                            // Configured node (not 127)
+                            if (is_new) {
+                                ESP_LOGI(TAG, "New configured node discovered: node_id=%u type=%s input_count=%u", (unsigned)nodeId, type_str, (unsigned)input_count);
+                            } else {
+                                ESP_LOGD(TAG, "Node announce: node_id=%u type=%s input_count=%u", (unsigned)nodeId, type_str, (unsigned)input_count);
+                            }
+                            
+                            // ALWAYS check for stale unconfigured entry when receiving HEARTBEAT from configured node
+                            auto unconf_it = g_nodes.find(NODE_ID_UNCONFIGURED);
+                            if (unconf_it != g_nodes.end()) {
+                                const NodeInfo& unconf_node = unconf_it->second;
+                                // Remove if type/count matches (likely same physical node)
+                                if (unconf_node.node_type == node_type && 
+                                    unconf_node.input_count == input_count) {
+                                    ESP_LOGI(TAG, "Removing stale unconfigured node entry (same as configured node %u)", (unsigned)nodeId);
+                                    g_nodes.erase(unconf_it);
+                                    removed_stale = true;
+                                }
+                            }
+                        }
+                        
+                        xSemaphoreGive(g_nodes_mutex);
+                        
+                        // If this HEARTBEAT is from a node we just reconfigured (old_id -> nodeId), remove old_id permanently (outside g_nodes_mutex to avoid deadlock)
+                        if (nodeId != NODE_ID_UNCONFIGURED && g_pending_reconfig_mutex && xSemaphoreTake(g_pending_reconfig_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+                            auto pit = g_pending_reconfig_old_id.find(nodeId);
+                            if (pit != g_pending_reconfig_old_id.end()) {
+                                uint8_t old_id = pit->second;
+                                g_pending_reconfig_old_id.erase(pit);
+                                xSemaphoreGive(g_pending_reconfig_mutex);
+                                if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
+                                    auto oit = g_nodes.find(old_id);
+                                    if (oit != g_nodes.end()) {
+                                        ESP_LOGI(TAG, "Removing old node ID %u permanently (node now sending as %u)", (unsigned)old_id, (unsigned)nodeId);
+                                        g_nodes.erase(oit);
+                                        defer_save_nodes_to_config();
+                                    }
+                                    xSemaphoreGive(g_nodes_mutex);
+                                }
+                            } else {
+                                xSemaphoreGive(g_pending_reconfig_mutex);
+                            }
+                        }
+                        
+                        // Save to config (throttle: only save if it's a new node, stale entry was removed, or every 10 seconds)
+                        static int64_t last_save_time_us = 0;
+                        if (is_new || removed_stale || (current_time_us - last_save_time_us) > 10000000) { // 10 seconds
+                            defer_save_nodes_to_config();
+                            last_save_time_us = current_time_us;
+                        }
+                    }
+                } else {
+                    // Minimal heartbeat without type/input_count - just update timestamp
+                    if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
+                        auto it = g_nodes.find(nodeId);
+                        if (it != g_nodes.end()) {
+                            it->second.last_seen_timestamp_us = current_time_us;
+                        }
+                        xSemaphoreGive(g_nodes_mutex);
+                    }
+                    ESP_LOGD(TAG, "Heartbeat from node 0x%02X", nodeId);
+                }
+            } else {
+                ESP_LOGW(TAG, "Unknown message type: 0x%02X (CAN ID: 0x%03X, SID: 0x%03X)", 
+                         (unsigned)msgType, (unsigned)frame.can_id, sid);
             }
         }
     }
@@ -934,14 +1602,13 @@ void can_processing_task(void *pvParameter) {
 
 void test_can_hardware() {
     ESP_LOGI(TAG, "=== CAN Hardware Diagnostic ===");
-    
-    // Test SPI communication
-    uint8_t reset_cmd = 0xC0; // Reset command
-    spi_transaction_t t = {
-        .length = 8,
-        .tx_buffer = &reset_cmd
-    };
-    
+
+    // Test SPI communication (use internal tx_data so transaction descriptor is valid for driver)
+    spi_transaction_t t = {};
+    t.length = 8;
+    t.flags = SPI_TRANS_USE_TXDATA;
+    t.tx_data[0] = 0xC0;  // Reset command
+
     esp_err_t spi_ret = spi_device_transmit(can_spi_handle, &t);
     ESP_LOGI(TAG, "SPI transmit test: %s", esp_err_to_name(spi_ret));
     
@@ -1002,28 +1669,32 @@ void main_task(void *pvParameter)
             // Wait for an interrupt signal from the ISR
             uint32_t io_num;
             if (xQueueReceive(gpio_evt_queue, &io_num, pdMS_TO_TICKS(1000))) {
-                int messages_processed = 0;
-                can_frame received_frame;
-                do {
-                    if (mcp2515_ptr->readMessage(&received_frame) == MCP2515::ERROR_OK) {
-                        messages_processed++;
-                        if (xQueueSend(can_message_queue, &received_frame, 0) != pdPASS) {
-                            ESP_LOGW(TAG, "CAN processing queue full! Dropped message ID: 0x%lX", received_frame.can_id);
+                // Serialize all MCP2515 SPI access (read + send) to avoid spi_master assert (ret_trans == trans_desc)
+                if (g_can_send_mutex && xSemaphoreTake(g_can_send_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                    int messages_processed = 0;
+                    can_frame received_frame;
+                    do {
+                        if (mcp2515_ptr->readMessage(&received_frame) == MCP2515::ERROR_OK) {
+                            messages_processed++;
+                            if (xQueueSend(can_message_queue, &received_frame, 0) != pdPASS) {
+                                ESP_LOGW(TAG, "CAN processing queue full! Dropped message ID: 0x%lX", received_frame.can_id);
+                            }
+                        } else {
+                            break; // No more messages
                         }
-                    } else {
-                        break; // No more messages
+                        if (messages_processed >= 10) {
+                            ESP_LOGW(TAG, "Reached safety limit of 10 messages per interrupt");
+                            break;
+                        }
+                    } while (true);
+                    if (mcp2515_ptr->checkError()) {
+                        uint8_t err_flags = mcp2515_ptr->getErrorFlags();
+                        ESP_LOGW(TAG, "CAN error detected (flags: 0x%02X), clearing flags.", err_flags);
+                        mcp2515_ptr->clearRXnOVRFlags();
+                        mcp2515_ptr->clearInterrupts();
                     }
-                    if (messages_processed >= 10) {
-                        ESP_LOGW(TAG, "Reached safety limit of 10 messages per interrupt");
-                        break;
-                    }
-                } while (true);
-            }
-            if (mcp2515_ptr->checkError()) {
-                uint8_t err_flags = mcp2515_ptr->getErrorFlags();
-                ESP_LOGW(TAG, "CAN error detected (flags: 0x%02X), clearing flags.", err_flags);
-                mcp2515_ptr->clearRXnOVRFlags();
-                mcp2515_ptr->clearInterrupts();
+                    xSemaphoreGive(g_can_send_mutex);
+                }
             }
         }else {
             // If CAN is not available, just delay to avoid a tight loop
@@ -1070,6 +1741,35 @@ void animation_task(void *pvParameter)
                 free(json_str);
             }
             cJSON_Delete(root);
+
+            // Send NODE_STATE_FEEDBACK to each LCD node (throttled inside maybe_send_feedback_to_node)
+            if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+                std::vector<uint8_t> lcd_nodes;
+                for (const auto& pair : g_nodes) {
+                    if (pair.second.node_type == NODE_TYPE_LCD && pair.second.node_id != NODE_ID_UNCONFIGURED)
+                        lcd_nodes.push_back(pair.second.node_id);
+                }
+                xSemaphoreGive(g_nodes_mutex);
+                for (uint8_t nid : lcd_nodes)
+                    maybe_send_feedback_to_node(nid);
+
+                // Send date/time to each LCD node every hour (Unix timestamp)
+                static uint32_t datetime_send_counter = 0;
+                datetime_send_counter++;
+                if (datetime_send_counter >= 36000) {  // 100ms * 36000 = 1 hour
+                    datetime_send_counter = 0;
+                    time_t t = time(nullptr);
+                    uint32_t ts = (uint32_t)t;
+                    uint8_t datetime_payload[4] = {
+                        (uint8_t)(ts & 0xFF),
+                        (uint8_t)((ts >> 8) & 0xFF),
+                        (uint8_t)((ts >> 16) & 0xFF),
+                        (uint8_t)((ts >> 24) & 0xFF)
+                    };
+                    for (uint8_t nid : lcd_nodes)
+                        send_node_config(nid, CMD_SET_DATETIME, datetime_payload, sizeof(datetime_payload));
+                }
+            }
         }
 
         vTaskDelay(pdMS_TO_TICKS(16)); // ~60Hz loop for smooth fades
