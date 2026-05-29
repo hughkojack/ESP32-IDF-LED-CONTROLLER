@@ -429,6 +429,11 @@ endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
+  include("C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/ds3231/cmake_install.cmake")
+endif()
+
+if(NOT CMAKE_INSTALL_LOCAL_ONLY)
+  # Include the install script for the subdirectory.
   include("C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/esp32-mcp2515/cmake_install.cmake")
 endif()
 

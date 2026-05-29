@@ -60,12 +60,17 @@ Additional (optional) action codes supported by the hub:
 CAN_ID = (0x3 << 7) | target_node_id. Payload: byte 0 = command, bytes 1-7 = command-specific data.
 
 - 0x01 CMD_SET_NODE_ID: new_id (1..126)
-- 0x02 CMD_SET_INPUT_CFG: input_index, input_id, mode
+- 0x02 CMD_SET_INPUT_CFG: bytes after command: `input_index` (0..5), `input_id`, `mode` (0 momentary, 1 toggle). Legacy DLC 4 ends here. DLC 5 adds `gpio` (0..48 or 0xFF unset). DLC 6 adds `active_high` (0 = active low / switch to GND with pull-up, 1 = active high with pull-down). If DLC < 6, node uses active low.
 - 0x03 CMD_SET_INPUT_COUNT: count (1..6)
-- 0x04 CMD_SET_TIMING: timing bytes (8-byte frame: cmd + click_max_lo/hi, double_click_gap_lo/hi, hold_min_lo/hi, long_hold_min one byte 0–255)
+- 0x04 CMD_SET_TIMING: timing sent as two 6-byte frames (cmd + 5 data). Frame 1: data[1]=0 (part), data[2..3]=click_max_ms LE, data[4..5]=double_click_gap_ms LE. Frame 2: data[1]=1 (part), data[2..3]=hold_min_ms LE, data[4..5]=long_hold_min_ms LE. All values uint16, 0–65535 ms.
 - 0x05 CMD_FIND_ME: duration_min
 - 0x06 CMD_SET_FIND_ME_OUTPUT: output_index
 - 0x07 CMD_SET_INPUT_LABEL: input_index, total_len_or_0xFF, up to 6 chars per frame. Multi-frame for labels longer than 6 chars. Byte 2 = total length (1..24) on first frame, 0xFF on continuation; use 0 to clear label.
+- 0x08 CMD_SET_DATETIME: Unix timestamp (uint32_t LE, bytes 1–4). Hub sends UTC; LCD applies CMD_SET_TIMEZONE and uses localtime() for display.
+- 0x09 CMD_REBOOT: no payload; node restarts.
+- 0x0A CMD_SET_CAN_LINK_INDICATOR: gpio (0–48 = CAN link LED: solid=good link, flash=bad/no link; 0xFF=disable). Mechanical node only.
+- 0x0B CMD_SET_TIMEZONE: multi-frame like CMD_SET_INPUT_LABEL: byte 1 = total_len (first frame) or 0xFF (continuation), bytes 2–7 = TZ string (e.g. `Australia/Sydney`), 6 chars per frame. Hub sends before CMD_SET_DATETIME so LCD can setenv("TZ", ...) and show local time.
+- 0x0C CMD_SET_NIGHT_LIGHT: enabled (0=off, 1=on), brightness (0–100). Mechanical node WS2812 strip; stored in node NVS.
 
 ### NODE_STATE_FEEDBACK (MessageType = 0x4)
 

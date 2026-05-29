@@ -65,5 +65,6 @@ C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/wifi_provisioning/libwifi_pr
 C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/cJSON/libcJSON.a
 C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/hsg_api/libhsg_api.a
 C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/hsg_outputs/libhsg_outputs.a
+C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/ds3231/libds3231.a
 C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/esp32-mcp2515/libesp32-mcp2515.a
 C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/src/libsrc.a

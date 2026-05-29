@@ -59,6 +59,7 @@ static SemaphoreHandle_t g_history_mutex = nullptr;
 static esp_err_t send_json(httpd_req_t *req, cJSON *root) {
     char *out = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     httpd_resp_sendstr(req, out ? out : "{}");
     if (out) free(out);
     cJSON_Delete(root);
@@ -110,6 +111,8 @@ static void ensure_layout(cJSON* root) {
     if (!groups) cJSON_AddItemToObject(config, "groups", groups = cJSON_CreateObject());
     cJSON* mqtt = cJSON_GetObjectItem(config, "mqtt");
     if (!mqtt) cJSON_AddItemToObject(config, "mqtt", mqtt = cJSON_CreateObject());
+    cJSON* system = cJSON_GetObjectItem(config, "system");
+    if (!system) cJSON_AddItemToObject(config, "system", system = cJSON_CreateObject());
     cJSON* nodes = cJSON_GetObjectItem(config, "nodes");
     if (!nodes) cJSON_AddItemToObject(config, "nodes", nodes = cJSON_CreateArray());
 }
@@ -132,6 +135,17 @@ static std::vector<uint8_t> scan_pca9685_addrs(i2c_port_t port) {
 //            ESP_LOGI(TAG, "Found I2C device at 0x%02X", addr);
             found.push_back(addr);
         }
+    }
+    return found;
+}
+
+// Probe DS3231 RTC addresses (0x68, 0x69) for "other devices" list in scan response
+static std::vector<uint8_t> scan_rtc_addrs() {
+    std::vector<uint8_t> found;
+    const uint8_t addrs[] = { 0x68, 0x69 };
+    for (uint8_t addr : addrs) {
+        if (i2c_probe(i2c_bus_handle, addr) == ESP_OK)
+            found.push_back(addr);
     }
     return found;
 }
@@ -243,7 +257,28 @@ static esp_err_t h_adopt(httpd_req_t* req) {
     cJSON_AddStringToObject(sys, "uptime", get_uptime_string().c_str());
     cJSON_AddStringToObject(sys, "lastResetReason", get_reset_reason_string());
     cJSON_AddBoolToObject(sys, "wsConnected", (g_ws_fd != -1));
-    
+    std::string rtcStr;
+    std::string sysStr;
+    if (g_init.get_rtc_time_cb) rtcStr = g_init.get_rtc_time_cb();
+    if (g_init.get_system_time_cb) sysStr = g_init.get_system_time_cb();
+    /* When RTC is stale (e.g. 2000), show system time so UI displays correct time; set rtcStale so UI can note it */
+    bool rtc_stale = (rtcStr.size() >= 4 && rtcStr[0] == '2' && rtcStr[1] == '0' && rtcStr[2] == '0' && rtcStr[3] == '0');
+    const char* display_rtc = (rtc_stale && !sysStr.empty()) ? sysStr.c_str() : (rtcStr.empty() ? "-" : rtcStr.c_str());
+    cJSON_AddStringToObject(sys, "rtcTime", display_rtc);
+    cJSON_AddBoolToObject(sys, "rtcStale", rtc_stale);
+    cJSON_AddStringToObject(sys, "systemTime", sysStr.empty() ? "-" : sysStr.c_str());
+    std::string tz_str = "UTC";
+    cJSON* cfg_root = load_cfg_json();
+    if (cfg_root) {
+        ensure_layout(cfg_root);
+        cJSON* cfg = cJSON_GetObjectItem(cfg_root, "config");
+        cJSON* sys_cfg = cfg ? cJSON_GetObjectItem(cfg, "system") : nullptr;
+        cJSON* tz_item = sys_cfg ? cJSON_GetObjectItem(sys_cfg, "timezone") : nullptr;
+        if (tz_item && cJSON_IsString(tz_item) && tz_item->valuestring && tz_item->valuestring[0])
+            tz_str = tz_item->valuestring;
+        cJSON_Delete(cfg_root);
+    }
+    cJSON_AddStringToObject(sys, "timezone", tz_str.c_str());
     cJSON_AddItemToObject(root, "system", sys);
 
     return send_json(req, root);
@@ -307,12 +342,13 @@ static esp_err_t h_config_post(httpd_req_t* req) {
     }
 
     // Save the newly merged configuration back to NVS
-    save_cfg_json(full_config_root);
+    esp_err_t save_err = save_cfg_json(full_config_root);
     cJSON_Delete(posted_config);
     cJSON_Delete(full_config_root);
-   
-    // Reload the output mapping in case it changed
-//    hsg_outputs_reload_config();
+    if (save_err != ESP_OK) {
+        ESP_LOGE(TAG, "Config save failed: %s", esp_err_to_name(save_err));
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Config save failed");
+    }
 
     // NEW: Notify main that the config has changed
     if (g_init.config_updated_cb) {
@@ -363,6 +399,15 @@ static esp_err_t h_command(httpd_req_t* req) {
         vTaskDelay(pdMS_TO_TICKS(100));
         esp_restart();
         return ESP_OK;
+    }
+
+    if (cJSON_IsTrue(cJSON_GetObjectItem(cmd, "sync_rtc"))) {
+        std::string err;
+        if (g_init.sync_time_to_rtc_cb) err = g_init.sync_time_to_rtc_cb();
+        else err = "RTC sync not configured";
+        cJSON_Delete(cmd);
+        if (err.empty()) return httpd_resp_sendstr(req, "OK");
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, err.c_str());
     }
 
     int fade = 0;
@@ -444,6 +489,14 @@ static esp_err_t h_node_config_post(httpd_req_t* req) {
             cJSON_Delete(root);
             return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "output_index required");
         }
+    } else if (strcmp(cmd_str, "set_can_link_indicator") == 0) {
+        cmd_byte = CMD_SET_CAN_LINK_INDICATOR;
+        int gpio = 255;
+        if (auto* v = cJSON_GetObjectItem(root, "can_link_indicator_gpio"); cJSON_IsNumber(v))
+            gpio = v->valueint;
+        if (gpio < 0 || (gpio > 48 && gpio != 255)) gpio = 255;
+        payload[0] = (uint8_t)(gpio & 0xFF);
+        plen = 1;
     } else if (strcmp(cmd_str, "set_input_count") == 0) {
         cmd_byte = CMD_SET_INPUT_COUNT;
         if (auto* v = cJSON_GetObjectItem(root, "count"); cJSON_IsNumber(v) && v->valueint >= 1 && v->valueint <= 6) {
@@ -469,12 +522,18 @@ static esp_err_t h_node_config_post(httpd_req_t* req) {
             payload[0] = (uint8_t)idx->valueint;
             payload[1] = (uint8_t)(id->valueint & 0xFF);
             payload[2] = (uint8_t)mode_val;
-            plen = 3;
+            uint8_t gpio_byte = 0xFF;
             auto* gpio_item = cJSON_GetObjectItem(root, "gpio");
-            if (cJSON_IsNumber(gpio_item) && ((gpio_item->valueint >= 0 && gpio_item->valueint <= 48) || gpio_item->valueint == 255)) {
-                payload[3] = (uint8_t)(gpio_item->valueint & 0xFF);
-                plen = 4;
-            }
+            if (cJSON_IsNumber(gpio_item) && ((gpio_item->valueint >= 0 && gpio_item->valueint <= 48) || gpio_item->valueint == 255))
+                gpio_byte = (uint8_t)(gpio_item->valueint & 0xFF);
+            payload[3] = gpio_byte;
+            int active_high_val = 0;
+            if (auto* ah = cJSON_GetObjectItem(root, "active_high"); cJSON_IsBool(ah))
+                active_high_val = cJSON_IsTrue(ah) ? 1 : 0;
+            else if (cJSON_IsNumber(ah))
+                active_high_val = (int)(ah->valueint & 1);
+            payload[4] = (uint8_t)active_high_val;
+            plen = 5;
         } else {
             cJSON_Delete(root);
             return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "input_index 0..5, input_id, mode (0/1 or momentary/toggle) required");
@@ -487,7 +546,6 @@ static esp_err_t h_node_config_post(httpd_req_t* req) {
             g_init.set_node_input_label_cb(target_node_id, (uint8_t)idx->valueint, label_str ? label_str : "");
         }
     } else if (strcmp(cmd_str, "set_timing") == 0) {
-        cmd_byte = CMD_SET_TIMING;
         int click_max = 500, dbl_gap = 400, hold_min = 800, long_hold = 2000;
         if (auto* v = cJSON_GetObjectItem(root, "click_max_ms"); cJSON_IsNumber(v)) click_max = v->valueint;
         if (auto* v = cJSON_GetObjectItem(root, "double_click_gap_ms"); cJSON_IsNumber(v)) dbl_gap = v->valueint;
@@ -500,16 +558,39 @@ static esp_err_t h_node_config_post(httpd_req_t* req) {
         if (hold_min < 0) hold_min = 0;
         if (hold_min > 65535) hold_min = 65535;
         if (long_hold < 0) long_hold = 0;
-        if (long_hold > 255) long_hold = 255;  // CAN frame limited to 8 bytes; long_hold sent as 1 byte
-        uint16_t c = (uint16_t)click_max, g = (uint16_t)dbl_gap, h = (uint16_t)hold_min;
-        payload[0] = (uint8_t)(c & 0xFF);
-        payload[1] = (uint8_t)(c >> 8);
-        payload[2] = (uint8_t)(g & 0xFF);
-        payload[3] = (uint8_t)(g >> 8);
-        payload[4] = (uint8_t)(h & 0xFF);
-        payload[5] = (uint8_t)(h >> 8);
-        payload[6] = (uint8_t)long_hold;
-        plen = 7;
+        if (long_hold > 65535) long_hold = 65535;
+        uint16_t c = (uint16_t)click_max, g = (uint16_t)dbl_gap, h = (uint16_t)hold_min, l = (uint16_t)long_hold;
+        // Part 0: click_max_ms, double_click_gap_ms (all 16-bit, two frames)
+        payload[0] = 0;
+        payload[1] = (uint8_t)(c & 0xFF);
+        payload[2] = (uint8_t)(c >> 8);
+        payload[3] = (uint8_t)(g & 0xFF);
+        payload[4] = (uint8_t)(g >> 8);
+        g_init.send_node_config_cb(target_node_id, CMD_SET_TIMING, payload, 5);
+        // Part 1: hold_min_ms, long_hold_min_ms
+        payload[0] = 1;
+        payload[1] = (uint8_t)(h & 0xFF);
+        payload[2] = (uint8_t)(h >> 8);
+        payload[3] = (uint8_t)(l & 0xFF);
+        payload[4] = (uint8_t)(l >> 8);
+        g_init.send_node_config_cb(target_node_id, CMD_SET_TIMING, payload, 5);
+        cJSON_Delete(root);
+        return httpd_resp_sendstr(req, "OK");
+    } else if (strcmp(cmd_str, "set_night_light") == 0) {
+        cmd_byte = CMD_SET_NIGHT_LIGHT;
+        int enabled = 0;
+        int brightness = 0;
+        if (auto* v = cJSON_GetObjectItem(root, "enabled"); cJSON_IsBool(v))
+            enabled = cJSON_IsTrue(v) ? 1 : 0;
+        else if (auto* v = cJSON_GetObjectItem(root, "enabled"); cJSON_IsNumber(v))
+            enabled = (v->valueint != 0) ? 1 : 0;
+        if (auto* v = cJSON_GetObjectItem(root, "brightness"); cJSON_IsNumber(v))
+            brightness = v->valueint;
+        if (brightness < 0) brightness = 0;
+        if (brightness > 100) brightness = 100;
+        payload[0] = (uint8_t)enabled;
+        payload[1] = (uint8_t)brightness;
+        plen = 2;
     } else if (strcmp(cmd_str, "reboot") == 0) {
         cmd_byte = CMD_REBOOT;
         plen = 0;
@@ -644,15 +725,25 @@ static esp_err_t h_ota(httpd_req_t* req) {
 static esp_err_t h_i2c_scan(httpd_req_t *req) {
     ESP_LOGI("API", "Received request to scan I2C devices.");
 
-    // Call the existing scan and prune function
-    // This is the same function we removed from app_main
     HSG::API::scan_and_prune_i2c(I2C_MASTER_NUM);
 
-    // Send a success response
-    const char* resp_str = "{\"status\": \"success\", \"message\": \"I2C scan and configuration prune complete.\"}";
+    std::vector<uint8_t> rtc_addrs = scan_rtc_addrs();
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "status", "success");
+    cJSON_AddStringToObject(root, "message", "I2C scan and configuration prune complete.");
+    cJSON* other = cJSON_CreateArray();
+    for (uint8_t a : rtc_addrs)
+        cJSON_AddItemToArray(other, cJSON_CreateNumber(a));
+    cJSON_AddItemToObject(root, "other_devices", other);
+    char* resp_str = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!resp_str) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, resp_str, strlen(resp_str));
-
+    free(resp_str);
     return ESP_OK;
 }
 
@@ -1010,7 +1101,7 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
                 } 
                 // --- FIX: Add this block to handle GROUP commands ---
                 else if (cJSON_IsString(group_json)) {
-                    int brightness = 100; // Default to ON
+                    int brightness = 50; // Default to ON (50%)
                     int fade_ms = 0;
 
                     const cJSON *brightness_json = cJSON_GetObjectItem(json, "brightness");

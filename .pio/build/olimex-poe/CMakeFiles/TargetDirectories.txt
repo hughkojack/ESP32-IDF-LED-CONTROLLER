@@ -663,6 +663,13 @@ C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/hsg_outputs/CMakeFiles/__idf
 C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/hsg_outputs/CMakeFiles/rebuild_cache.dir
 C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/hsg_outputs/CMakeFiles/list_install_components.dir
 C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/hsg_outputs/CMakeFiles/install/strip.dir
+C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/ds3231/CMakeFiles/rebuild_cache.dir
+C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/ds3231/CMakeFiles/__idf_ds3231.dir
+C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/ds3231/CMakeFiles/install/local.dir
+C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/ds3231/CMakeFiles/install.dir
+C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/ds3231/CMakeFiles/edit_cache.dir
+C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/ds3231/CMakeFiles/list_install_components.dir
+C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/ds3231/CMakeFiles/install/strip.dir
 C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/esp32-mcp2515/CMakeFiles/install/local.dir
 C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/esp32-mcp2515/CMakeFiles/install.dir
 C:/Dev/LED-Controller/.pio/build/olimex-poe/esp-idf/esp32-mcp2515/CMakeFiles/edit_cache.dir

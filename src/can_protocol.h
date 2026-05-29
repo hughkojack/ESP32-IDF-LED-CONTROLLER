@@ -36,7 +36,7 @@ enum CanMessageType : uint8_t {
 
 // Config sub-commands (payload byte 0 when NODE_CONFIG, hub -> node)
 #define CMD_SET_NODE_ID         0x01
-#define CMD_SET_INPUT_CFG       0x02
+#define CMD_SET_INPUT_CFG       0x02  // payload after cmd: [input_index][input_id][mode][gpio][active_high?]. DLC 4 legacy (idx,id,mode); DLC 5 +gpio; DLC 6 +active_high (0=active low default, 1=active high)
 #define CMD_SET_INPUT_COUNT     0x03
 #define CMD_SET_TIMING          0x04
 #define CMD_FIND_ME             0x05
@@ -44,6 +44,9 @@ enum CanMessageType : uint8_t {
 #define CMD_SET_INPUT_LABEL     0x07
 #define CMD_SET_DATETIME        0x08  // payload: Unix timestamp (uint32_t LE, bytes 1-4); hub sends every hour
 #define CMD_REBOOT              0x09  // no payload; node restarts
+#define CMD_SET_CAN_LINK_INDICATOR 0x0A  // payload: [gpio]; GPIO 0-48 for CAN link LED (solid=good link, flash=bad/no link), 0xFF=disable
+#define CMD_SET_TIMEZONE          0x0B  // payload: multi-frame like CMD_SET_INPUT_LABEL: byte 1 = total_len (first) or 0xFF (cont.), bytes 2-7 = TZ string (6 chars/frame); hub sends before CMD_SET_DATETIME so LCD can use localtime()
+#define CMD_SET_NIGHT_LIGHT       0x0C  // payload: [enabled 0/1, brightness 0-100]; mechanical WS2812 night light
 
 // Node types
 #define NODE_TYPE_LCD        1

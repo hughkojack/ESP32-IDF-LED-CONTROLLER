@@ -167,6 +167,20 @@
                         <p><strong>Sketch Size:</strong> <span id="sysSketch">-</span> bytes</p>
                         <p><strong>Last Reset Reason:</strong> <span id="sysLastResetReason">-</span></p>
                         <p><strong>Uptime:</strong> <span id="sysUptime">-</span></p>
+                        <p><strong>Display timezone:</strong> <select id="sysTimezone" class="ml-2 bg-gray-700 text-white border border-gray-600 rounded px-2 py-0.5 text-sm">
+                            <option value="UTC">UTC</option>
+                            <option value="Europe/London">Europe/London</option>
+                            <option value="Europe/Paris">Europe/Paris</option>
+                            <option value="Europe/Berlin">Europe/Berlin</option>
+                            <option value="America/New_York">America/New_York</option>
+                            <option value="America/Los_Angeles">America/Los_Angeles</option>
+                            <option value="America/Chicago">America/Chicago</option>
+                            <option value="Asia/Tokyo">Asia/Tokyo</option>
+                            <option value="Australia/Sydney">Australia/Sydney</option>
+                        </select></p>
+                        <p><strong>Hub time:</strong> <span id="sysHubTime">-</span> &nbsp;|&nbsp; <strong>RTC time:</strong> <span id="sysRtcTime">-</span></p>
+                        <p class="text-gray-400 text-xs mt-1">When the hub has internet (NTP), use the button below to write the current time to the RTC. The RTC keeps time across reboot only if the DS3231 module has a backup battery (CR2032) installed.</p>
+                        <button type="button" id="syncRtcBtn" class="mt-2 text-sm bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-1.5 px-3 rounded-md transition duration-300">Sync RTC from system time</button>
                         <p><strong>WebSocket Connected:</strong> <span id="sysWsConnected">-</span></p>
                     </div>
                 </div>
@@ -264,11 +278,11 @@
                                 <div class="mt-1 flex items-center gap-2">
                                     <div class="brightness-slider-wrap flex-1">
                                         <div class="brightness-slider-track"></div>
-                                        <div class="brightness-slider-fill" id="bindBrightnessFill" style="width: 100%;"></div>
-                                        <div class="brightness-slider-glow" id="bindBrightnessGlow" style="width: 100%;"></div>
-                                        <input type="range" id="bindBrightness" min="0" max="100" value="100" class="brightness-slider h-2 rounded-lg cursor-pointer">
+                                        <div class="brightness-slider-fill" id="bindBrightnessFill" style="width: 50%;"></div>
+                                        <div class="brightness-slider-glow" id="bindBrightnessGlow" style="width: 50%;"></div>
+                                        <input type="range" id="bindBrightness" min="0" max="100" value="50" class="brightness-slider h-2 rounded-lg cursor-pointer">
                                     </div>
-                                    <span id="bindBrightnessValue" class="text-white font-mono w-10">100</span><span class="text-gray-400">%</span>
+                                    <span id="bindBrightnessValue" class="text-white font-mono w-10">50</span><span class="text-gray-400">%</span>
                                 </div>
                             </div>
                             <div>
@@ -354,6 +368,30 @@
                                     <button id="findMeFromModalBtn" class="bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold py-2 px-4 rounded-md transition duration-300">Find Me</button>
                                 </div>
                             </div>
+                            <div id="nodeCanLinkIndicatorWrap" class="border-t border-gray-600 pt-4 mt-4 hidden">
+                                <h4 class="text-sm font-medium text-gray-300 mb-2">CAN link indicator GPIO (mechanical)</h4>
+                                <p class="text-xs text-gray-400 mb-2">GPIO 0–48 to indicate CAN link: solid = good link, flashing = bad/no link. Leave empty or 255 to disable.</p>
+                                <div class="flex items-center gap-2">
+                                    <input type="number" id="nodeCanLinkIndicatorInput" min="0" max="48" placeholder="GPIO or empty" class="bg-gray-600 text-white rounded px-3 py-2 border border-gray-500 w-24" title="0-48 or leave empty to disable">
+                                    <button id="setCanLinkIndicatorBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-md transition duration-300">Set</button>
+                                </div>
+                            </div>
+                            <div id="nodeNightLightWrap" class="border-t border-gray-600 pt-4 mt-4 hidden">
+                                <h4 class="text-sm font-medium text-gray-300 mb-2">WS2812 night light (mechanical)</h4>
+                                <p class="text-xs text-gray-400 mb-2">Warm dim strip on D6 (GPIO 21). Short presses still flash white briefly.</p>
+                                <div class="flex flex-col gap-3">
+                                    <label class="flex items-center gap-2 text-sm text-gray-300">
+                                        <input type="checkbox" id="nodeNightLightEnabled" class="rounded">
+                                        Night light on
+                                    </label>
+                                    <div class="flex items-center gap-3">
+                                        <label for="nodeNightLightBrightness" class="text-sm text-gray-400 whitespace-nowrap">Brightness</label>
+                                        <input type="range" id="nodeNightLightBrightness" min="0" max="100" value="30" class="flex-1">
+                                        <span id="nodeNightLightBrightnessVal" class="text-sm text-gray-300 w-10 text-right">30</span>
+                                    </div>
+                                    <button id="setNightLightBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-md transition duration-300 w-full">Apply night light</button>
+                                </div>
+                            </div>
                             <div class="border-t border-gray-600 pt-4 mt-4">
                                 <h4 class="text-sm font-medium text-gray-300 mb-2">Switch type per input</h4>
                                 <p class="text-xs text-gray-400 mb-2">Set each input to momentary (button) or toggle (rocker/maintained).</p>
@@ -381,8 +419,8 @@
                                 <input type="number" id="timingHoldMin" min="0" max="65535" value="800" class="w-full bg-gray-600 text-white rounded px-2 py-1.5 border border-gray-500 text-sm">
                             </div>
                             <div>
-                                <label for="timingLongHold" class="block text-xs text-gray-400 mb-1">Long hold (0–255 ms)</label>
-                                <input type="number" id="timingLongHold" min="0" max="255" value="200" class="w-full bg-gray-600 text-white rounded px-2 py-1.5 border border-gray-500 text-sm">
+                                <label for="timingLongHold" class="block text-xs text-gray-400 mb-1">Long hold (ms)</label>
+                                <input type="number" id="timingLongHold" min="0" max="65535" value="2000" class="w-full bg-gray-600 text-white rounded px-2 py-1.5 border border-gray-500 text-sm">
                             </div>
                         </div>
                         <div class="flex gap-2">
@@ -467,11 +505,11 @@
                             <div class="mt-1 flex items-center gap-2">
                                 <div class="brightness-slider-wrap flex-1">
                                     <div class="brightness-slider-track"></div>
-                                    <div class="brightness-slider-fill" id="commandBrightnessFill" style="width: 100%;"></div>
-                                    <div class="brightness-slider-glow" id="commandBrightnessGlow" style="width: 100%;"></div>
-                                    <input type="range" id="commandBrightness" min="0" max="100" value="100" class="brightness-slider h-2 rounded-lg cursor-pointer">
+                                    <div class="brightness-slider-fill" id="commandBrightnessFill" style="width: 50%;"></div>
+                                    <div class="brightness-slider-glow" id="commandBrightnessGlow" style="width: 50%;"></div>
+                                    <input type="range" id="commandBrightness" min="0" max="100" value="50" class="brightness-slider h-2 rounded-lg cursor-pointer">
                                 </div>
-                                <span id="commandBrightnessValue" class="text-white font-mono w-10">100</span><span class="text-gray-400">%</span>
+                                <span id="commandBrightnessValue" class="text-white font-mono w-10">50</span><span class="text-gray-400">%</span>
                             </div>
                         </div>
                         <div>
@@ -643,6 +681,14 @@
             const nodeFindMeOutputInput = document.getElementById('nodeFindMeOutputInput');
             const nodeFindMeDurationInput = document.getElementById('nodeFindMeDurationInput');
             const findMeFromModalBtn = document.getElementById('findMeFromModalBtn');
+            const nodeCanLinkIndicatorWrap = document.getElementById('nodeCanLinkIndicatorWrap');
+            const nodeCanLinkIndicatorInput = document.getElementById('nodeCanLinkIndicatorInput');
+            const setCanLinkIndicatorBtn = document.getElementById('setCanLinkIndicatorBtn');
+            const nodeNightLightWrap = document.getElementById('nodeNightLightWrap');
+            const nodeNightLightEnabled = document.getElementById('nodeNightLightEnabled');
+            const nodeNightLightBrightness = document.getElementById('nodeNightLightBrightness');
+            const nodeNightLightBrightnessVal = document.getElementById('nodeNightLightBrightnessVal');
+            const setNightLightBtn = document.getElementById('setNightLightBtn');
 
             let currentBindings = [];
             let currentConfiguringNodeId = null;
@@ -669,6 +715,30 @@
             uploadFwBtn.addEventListener('click', uploadFirmware);
             scanI2cButton.addEventListener('click', scanI2cDevices);
             restartBtn.addEventListener('click', restartDevice);
+            const syncRtcBtn = document.getElementById('syncRtcBtn');
+            if (syncRtcBtn) {
+                syncRtcBtn.addEventListener('click', async () => {
+                    syncRtcBtn.disabled = true;
+                    showStatus('Syncing RTC from system time...', 'loading');
+                    try {
+                        const response = await fetch('/api/command', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ sync_rtc: true })
+                        });
+                        if (!response.ok) {
+                            const errText = await response.text();
+                            throw new Error(errText || 'RTC sync failed');
+                        }
+                        showStatus('RTC updated from system time.', 'success');
+                        fetchData();
+                    } catch (err) {
+                        showStatus(err.message || 'Failed to sync RTC.', 'error');
+                    } finally {
+                        syncRtcBtn.disabled = false;
+                    }
+                });
+            }
             navTabs.addEventListener('click', (event) => {
                 if (event.target.classList.contains('tab-button')) {
                     handleTabClick(event.target);
@@ -697,6 +767,14 @@
             if (applyInputTypesBtn) applyInputTypesBtn.addEventListener('click', applyInputTypes);
             if (setInputCountBtn) setInputCountBtn.addEventListener('click', setInputCount);
             if (findMeFromModalBtn) findMeFromModalBtn.addEventListener('click', sendFindMeFromModal);
+            if (setCanLinkIndicatorBtn) setCanLinkIndicatorBtn.addEventListener('click', sendCanLinkIndicatorFromModal);
+            if (nodeNightLightBrightness) {
+                nodeNightLightBrightness.addEventListener('input', () => {
+                    if (nodeNightLightBrightnessVal)
+                        nodeNightLightBrightnessVal.textContent = nodeNightLightBrightness.value;
+                });
+            }
+            if (setNightLightBtn) setNightLightBtn.addEventListener('click', sendNightLightFromModal);
             const openNodeTimingBtn = document.getElementById('openNodeTimingBtn');
             const sendTimingToAllBtn = document.getElementById('sendTimingToAllBtn');
             const nodeTimingModal = document.getElementById('nodeTimingModal');
@@ -724,9 +802,10 @@
                 mainContent.classList.add('hidden');
                 navTabs.classList.add('hidden');
                 try {
+                    const ts = Date.now();
                     const [adoptResponse, configResponse] = await Promise.all([
-                        fetch(`/api/adopt`),
-                        fetch(`/api/config`)
+                        fetch(`/api/adopt?t=${ts}`),
+                        fetch(`/api/config?t=${ts}`)
                     ]);
                     if (!adoptResponse.ok || !configResponse.ok) throw new Error(`HTTP error!`);
                     const adoptData = await adoptResponse.json();
@@ -769,6 +848,62 @@
                 sysHeapMin.textContent = data.system?.heapMinFree || '-';
                 sysSketch.textContent = data.system?.sketchSpaceUsedBytes || '-';
                 sysUptime.textContent = data.system?.uptime || '-';
+                const tz = data.config?.system?.timezone || data.system?.timezone || 'UTC';
+                const sysTimezoneEl = document.getElementById('sysTimezone');
+                if (sysTimezoneEl) {
+                    sysTimezoneEl.value = tz;
+                    if (!sysTimezoneEl.dataset.bound) {
+                        sysTimezoneEl.dataset.bound = '1';
+                        sysTimezoneEl.addEventListener('change', async () => {
+                            const selected = sysTimezoneEl.value;
+                            const hubEl = document.getElementById('sysHubTime');
+                            const rtcEl = document.getElementById('sysRtcTime');
+                            if (hubEl && hubEl.dataset.utc) hubEl.textContent = formatUtcInTz(hubEl.dataset.utc, selected);
+                            if (rtcEl && rtcEl.dataset.utc) rtcEl.textContent = formatUtcInTz(rtcEl.dataset.utc, selected) + (rtcEl.dataset.rtcStale === '1' ? ' (RTC not set; use Sync RTC)' : '');
+                            try {
+                                const cfgRes = await fetch('/api/config');
+                                if (!cfgRes.ok) return;
+                                const cfg = await cfgRes.json();
+                                cfg.system = cfg.system || {};
+                                cfg.system.timezone = selected;
+                                const saveRes = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+                                if (saveRes.ok) {
+                                    showStatus('Timezone saved.', 'success');
+                                    await fetchData();
+                                    const el = document.getElementById('sysTimezone');
+                                    if (el) el.value = selected;
+                                } else {
+                                    showStatus('Failed to save timezone.', 'error');
+                                }
+                            } catch (e) { showStatus('Failed to save timezone.', 'error'); }
+                        });
+                    }
+                }
+                function formatUtcInTz(utcStr, timeZone) {
+                    if (!utcStr || utcStr === '-') return utcStr;
+                    try {
+                        const iso = utcStr.replace(' UTC', 'Z').replace(' ', 'T');
+                        const d = new Date(iso);
+                        if (isNaN(d.getTime())) return utcStr;
+                        return new Intl.DateTimeFormat(undefined, { timeZone: timeZone || 'UTC', dateStyle: 'medium', timeStyle: 'medium' }).format(d);
+                    } catch (e) {
+                        return utcStr;
+                    }
+                }
+                const sysHubTimeEl = document.getElementById('sysHubTime');
+                const sysRtcTimeEl = document.getElementById('sysRtcTime');
+                const hubUtc = data.system?.systemTime || '';
+                const rtcUtc = data.system?.rtcTime || '';
+                const rtcStale = !!data.system?.rtcStale;
+                if (sysHubTimeEl) {
+                    sysHubTimeEl.dataset.utc = hubUtc;
+                    sysHubTimeEl.textContent = formatUtcInTz(hubUtc, tz);
+                }
+                if (sysRtcTimeEl) {
+                    sysRtcTimeEl.dataset.utc = rtcUtc;
+                    sysRtcTimeEl.dataset.rtcStale = rtcStale ? '1' : '';
+                    sysRtcTimeEl.textContent = formatUtcInTz(rtcUtc, tz) + (rtcStale ? ' (RTC not set; use Sync RTC)' : '');
+                }
                 sysLastResetReason.textContent = data.system?.lastResetReason || '-';
                 sysWsConnected.textContent = data.system?.wsConnected ? 'Yes' : 'No';
 
@@ -947,7 +1082,7 @@
                     }
                     if (bindUseBrightness) bindUseBrightness.checked = (b.action.brightness !== undefined && b.action.brightness >= 0);
                     if (bindBrightness) {
-                        bindBrightness.value = (b.action.brightness !== undefined && b.action.brightness >= 0) ? b.action.brightness : 100;
+                        bindBrightness.value = (b.action.brightness !== undefined && b.action.brightness >= 0) ? b.action.brightness : 50;
                         if (bindBrightnessValue) bindBrightnessValue.textContent = bindBrightness.value;
                         updateBrightnessSliderFill(bindBrightness);
                     }
@@ -988,8 +1123,8 @@
                 if (bindFade) bindFade.value = '';
                 if (bindState) bindState.value = 'ON';
                 if (bindUseBrightness) bindUseBrightness.checked = false;
-                if (bindBrightness) bindBrightness.value = '100';
-                if (bindBrightnessValue) bindBrightnessValue.textContent = '100';
+                if (bindBrightness) bindBrightness.value = '50';
+                if (bindBrightnessValue) bindBrightnessValue.textContent = '50';
                 if (bindBrightness) updateBrightnessSliderFill(bindBrightness);
             }
 
@@ -1242,6 +1377,31 @@
                     if (nodeFindMeDurationInput) {
                         nodeFindMeDurationInput.value = '5';
                     }
+                    if (nodeCanLinkIndicatorWrap) {
+                        if (node.node_type === 2) {
+                            nodeCanLinkIndicatorWrap.classList.remove('hidden');
+                            if (nodeCanLinkIndicatorInput) {
+                                const v = node.can_link_indicator_gpio;
+                                nodeCanLinkIndicatorInput.value = (v !== undefined && v !== 0xFF && v >= 0 && v <= 48) ? String(v) : '';
+                            }
+                        } else {
+                            nodeCanLinkIndicatorWrap.classList.add('hidden');
+                        }
+                    }
+                    if (nodeNightLightWrap) {
+                        if (node.node_type === 2) {
+                            nodeNightLightWrap.classList.remove('hidden');
+                            if (nodeNightLightEnabled)
+                                nodeNightLightEnabled.checked = !!node.night_light_on;
+                            const br = (node.night_light_brightness !== undefined) ? node.night_light_brightness : 30;
+                            if (nodeNightLightBrightness) {
+                                nodeNightLightBrightness.value = String(br);
+                                if (nodeNightLightBrightnessVal) nodeNightLightBrightnessVal.textContent = String(br);
+                            }
+                        } else {
+                            nodeNightLightWrap.classList.add('hidden');
+                        }
+                    }
                     if (inputCount === 0) {
                         nodeInputTypesContainer.innerHTML = '<p class="text-xs text-gray-400">Set number of inputs above (1–6), then configure switch types below.</p>';
                         if (applyInputTypesBtn) applyInputTypesBtn.classList.add('hidden');
@@ -1254,13 +1414,18 @@
                         const mode = (entry && typeof entry.mode !== 'undefined') ? (entry.mode === 1 ? '1' : '0') : '0';
                         const label = (entry && entry.label) ? String(entry.label) : '';
                         const gpioVal = (entry && typeof entry.gpio !== 'undefined' && entry.gpio >= 0 && entry.gpio <= 48) ? String(entry.gpio) : '';
+                        const activeHigh = entry && (entry.active_high === true || entry.active_high === 1);
                         const row = document.createElement('div');
                         row.className = 'flex flex-col gap-1';
                         row.innerHTML = `
                             <div class="flex items-center justify-between gap-2">
                                 <label class="text-sm text-gray-300">Input ${i + 1}</label>
-                                <div class="flex items-center gap-2">
+                                <div class="flex items-center gap-2 flex-wrap justify-end">
                                     ${isMechanical ? `<input type="number" min="0" max="48" class="node-input-gpio-input bg-gray-600 text-white rounded px-2 py-1 text-sm border border-gray-500 w-20" data-input-index="${i}" placeholder="GPIO" value="${gpioVal}">` : ''}
+                                    ${isMechanical ? `<select class="node-input-active-high-select bg-gray-600 text-white rounded px-2 py-1 text-sm border border-gray-500" data-input-index="${i}" title="Switch wiring">
+                                        <option value="0" ${!activeHigh ? 'selected' : ''}>Active low</option>
+                                        <option value="1" ${activeHigh ? 'selected' : ''}>Active high</option>
+                                    </select>` : ''}
                                     <select class="node-input-mode-select bg-gray-600 text-white rounded px-2 py-1 text-sm border border-gray-500" data-input-index="${i}">
                                         <option value="0" ${mode === '0' ? 'selected' : ''}>Momentary</option>
                                         <option value="1" ${mode === '1' ? 'selected' : ''}>Toggle</option>
@@ -1357,6 +1522,74 @@
                 }
             }
 
+            async function sendNightLightFromModal() {
+                if (currentConfiguringNodeId === null) return;
+                if (!nodeNightLightEnabled || !nodeNightLightBrightness || !setNightLightBtn) return;
+                const enabled = nodeNightLightEnabled.checked;
+                let brightness = parseInt(nodeNightLightBrightness.value, 10);
+                if (isNaN(brightness)) brightness = 0;
+                if (brightness < 0) brightness = 0;
+                if (brightness > 100) brightness = 100;
+                const origText = setNightLightBtn.textContent;
+                setNightLightBtn.textContent = 'Sending...';
+                setNightLightBtn.disabled = true;
+                try {
+                    const response = await fetch('/api/node/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            target_node_id: currentConfiguringNodeId,
+                            command: 'set_night_light',
+                            enabled: enabled,
+                            brightness: brightness
+                        })
+                    });
+                    if (!response.ok) throw new Error(await response.text());
+                    setNightLightBtn.textContent = 'Saved';
+                    setTimeout(() => { setNightLightBtn.textContent = origText; setNightLightBtn.disabled = false; }, 1500);
+                    loadNodeInputTypes(currentConfiguringNodeId);
+                } catch (error) {
+                    console.error('Set night light:', error);
+                    alert('Error: ' + error.message);
+                    setNightLightBtn.textContent = origText;
+                    setNightLightBtn.disabled = false;
+                }
+            }
+
+            async function sendCanLinkIndicatorFromModal() {
+                if (currentConfiguringNodeId === null) return;
+                if (!nodeCanLinkIndicatorInput || !setCanLinkIndicatorBtn) return;
+                const raw = nodeCanLinkIndicatorInput.value.trim();
+                let gpio = 255;
+                if (raw !== '') {
+                    const n = parseInt(raw, 10);
+                    if (!isNaN(n) && n >= 0 && n <= 48) gpio = n;
+                }
+                const origText = setCanLinkIndicatorBtn.textContent;
+                setCanLinkIndicatorBtn.textContent = 'Sending...';
+                setCanLinkIndicatorBtn.disabled = true;
+                try {
+                    const response = await fetch('/api/node/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            target_node_id: currentConfiguringNodeId,
+                            command: 'set_can_link_indicator',
+                            can_link_indicator_gpio: gpio
+                        })
+                    });
+                    if (!response.ok) throw new Error(await response.text());
+                    setCanLinkIndicatorBtn.textContent = 'Saved';
+                    setTimeout(() => { setCanLinkIndicatorBtn.textContent = origText; setCanLinkIndicatorBtn.disabled = false; }, 1500);
+                    loadNodeInputTypes(currentConfiguringNodeId);
+                } catch (error) {
+                    console.error('Set CAN link indicator:', error);
+                    alert('Error: ' + error.message);
+                    setCanLinkIndicatorBtn.textContent = origText;
+                    setCanLinkIndicatorBtn.disabled = false;
+                }
+            }
+
             async function sendTimingToAllNodes() {
                 const btn = document.getElementById('sendTimingToAllBtn');
                 const clickMaxEl = document.getElementById('timingClickMax');
@@ -1374,8 +1607,8 @@
                 if (dblGap > 65535) dblGap = 65535;
                 if (isNaN(holdMin) || holdMin < 0) holdMin = 800;
                 if (holdMin > 65535) holdMin = 65535;
-                if (isNaN(longHold) || longHold < 0) longHold = 200;
-                if (longHold > 255) longHold = 255;
+                if (isNaN(longHold) || longHold < 0) longHold = 2000;
+                if (longHold > 65535) longHold = 65535;
                 const origText = btn.textContent;
                 btn.textContent = 'Sending...';
                 btn.disabled = true;
@@ -1431,6 +1664,7 @@
                         const sel = document.querySelector(`.node-input-mode-select[data-input-index="${i}"]`);
                         const labelInput = document.querySelector(`.node-input-label-input[data-input-index="${i}"]`);
                         const gpioInput = document.querySelector(`.node-input-gpio-input[data-input-index="${i}"]`);
+                        const activeHighSel = document.querySelector(`.node-input-active-high-select[data-input-index="${i}"]`);
                         const mode = sel ? parseInt(sel.value, 10) : 0;
                         const label = (labelInput && labelInput.value) ? String(labelInput.value).trim() : '';
                         let gpio = 255;
@@ -1438,13 +1672,15 @@
                             const g = parseInt(gpioInput.value.trim(), 10);
                             if (!isNaN(g) && g >= 0 && g <= 48) gpio = g;
                         }
+                        const active_high = activeHighSel ? (parseInt(activeHighSel.value, 10) === 1) : false;
                         const body = {
                             target_node_id: currentConfiguringNodeId,
                             command: 'set_input_cfg',
                             input_index: i,
                             input_id: i + 1,
                             mode: mode,
-                            label: label
+                            label: label,
+                            active_high: active_high
                         };
                         if (currentConfiguringNodeType === 2) body.gpio = gpio;
                         const response = await fetch('/api/node/config', {
@@ -1703,7 +1939,10 @@
                     i2c: getI2cMappingFromUi(),
                     groups: getGroupsFromUi(),
                     labels: getLabelsFromUi(),
-                    bindings: currentBindings // Add the current bindings array here
+                    bindings: currentBindings, // Add the current bindings array here
+                    system: {
+                        timezone: (document.getElementById('sysTimezone') && document.getElementById('sysTimezone').value) || 'UTC'
+                    }
                 };
 
                 setLoadingState(clickedButton, textEl, spinnerEl, true);
@@ -1930,10 +2169,13 @@
                     });
                     if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
                     const data = await response.json();
-                    
-                    // FIX: Use the 'message' field from the JSON, not 'devices'
-                    showStatus(data.message, 'success'); 
-                    statusEl.textContent = data.message;
+                    let statusText = data.message || 'I2C scan complete.';
+                    if (data.other_devices && data.other_devices.length > 0) {
+                        const addrs = data.other_devices.map(a => '0x' + Number(a).toString(16).toUpperCase().padStart(2, '0')).join(', ');
+                        statusText += ' DS3231 RTC at ' + addrs + ' detected.';
+                    }
+                    showStatus(statusText, 'success');
+                    statusEl.textContent = statusText;
                     statusEl.style.color = 'green';
 
                     // Optional: Refresh the page after a successful scan to see new devices

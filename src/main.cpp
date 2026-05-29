@@ -44,12 +44,17 @@ extern "C" {
 #include "HSG-API.h"
 #include "hsg_outputs.h"
 #include "hsg_pca9685.h"
+#include "ds3231.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include <ctime>
+#include <sys/time.h>
+#include "esp_netif_sntp.h"
 //#include "sdkconfig.h"
 
 static const char *TAG = "MAIN";
+
+static bool s_sntp_started = false;
 
 /*--------------------------- Constants ----------------------------------*/
 #define MAX_OUTPUTS 160
@@ -64,6 +69,13 @@ static bool s_wifi_connected = false;
 static esp_netif_t *s_eth_netif = NULL;
 static esp_netif_t *s_wifi_netif = NULL;
 i2c_master_bus_handle_t i2c_bus_handle;
+/* Cache last known-good RTC time (from boot or callback); used when live read from HTTP task returns stale */
+static std::string g_rtc_cache;
+static TickType_t g_rtc_cache_ticks = 0;
+static const TickType_t g_rtc_cache_max_age_ticks = pdMS_TO_TICKS(120000); /* 120s */
+/* Automatic RTC sync configuration: interval and per-boot flag */
+static const time_t RTC_AUTO_SYNC_INTERVAL_SEC = 24 * 3600; /* 24 hours */
+static bool s_rtc_auto_synced_this_boot = false;
 static spi_device_handle_t can_spi_handle;
 static MCP2515* mcp2515_ptr = nullptr;
 static QueueHandle_t gpio_evt_queue = nullptr;
@@ -111,14 +123,22 @@ struct NodeInfo {
     char input_labels[MAX_INPUTS_PER_NODE][MAX_INPUT_LABEL_LEN + 1];
     // Per-input GPIO (mechanical node); 0xFF = not assigned
     uint8_t input_gpio[MAX_INPUTS_PER_NODE];
+    // Per-input electrical sense: 0 = active low (pull-up, switch to GND), 1 = active high (pull-down)
+    uint8_t input_active_high[MAX_INPUTS_PER_NODE];
     // Output index (0-255) used by node for Find Me blink; 0xFF = unset (node default)
     uint8_t find_me_output_index;
+    // CAN link indicator GPIO (mechanical node): 0-48 = GPIO solid when link OK, flash when bad/no link; 0xFF = disabled
+    uint8_t can_link_indicator_gpio;
+    // WS2812 night light (mechanical node)
+    bool night_light_on;
+    uint8_t night_light_brightness;
 
-    NodeInfo() : node_id(0), node_type(0), input_count(0), last_seen_timestamp_us(0), is_configured(false), find_me_output_index(0xFF) {
+    NodeInfo() : node_id(0), node_type(0), input_count(0), last_seen_timestamp_us(0), is_configured(false), find_me_output_index(0xFF), can_link_indicator_gpio(0xFF), night_light_on(false), night_light_brightness(0) {
         for (int i = 0; i < MAX_INPUTS_PER_NODE; i++) {
             input_modes[i] = 0xFF;
             input_labels[i][0] = '\0';
             input_gpio[i] = 0xFF;
+            input_active_high[i] = 0;
         }
     }
 };
@@ -159,6 +179,7 @@ void animation_task(void *pvParameter);
 void can_processing_task(void *pvParameter);
 static void IRAM_ATTR gpio_isr_handler(void* arg);
 static void wifi_start(void);
+static void rtc_auto_sync_task(void *pvParameter);
 void setOutput(int output, int brightness, int fadeMs, unsigned long startTimeOffset = 0);
 static void send_node_config(uint8_t target_node_id, uint8_t cmd, const uint8_t* data, size_t len);
 static void set_node_input_label_impl(uint8_t node_id, uint8_t input_index, const char* label);
@@ -166,6 +187,7 @@ static void set_node_input_label_impl(uint8_t node_id, uint8_t input_index, cons
 static bool remove_node_from_registry(uint8_t node_id);
 static void w5500_hardware_reset();
 void set_esp32_mac_on_w5500(esp_eth_handle_t eth_handle);
+static std::string sync_rtc_from_system_time();
 
 // --- Core Logic ---
 void setOutput(int output, int brightness, int fadeMs, unsigned long startTimeOffset) {
@@ -180,6 +202,50 @@ void setOutput(int output, int brightness, int fadeMs, unsigned long startTimeOf
     // Store the last "ON" brightness for stateful commands
     if (brightness > 0) {
         outputBrightness[outputIndex] = brightness;
+    }
+}
+
+// Background task to automatically keep the DS3231 RTC in sync with system time.
+// Behaviour:
+//  - After boot, waits until system time is valid (NTP has synced) and then performs
+//    a one-time RTC sync for this boot (if not already done).
+//  - After that, re-syncs the RTC periodically every RTC_AUTO_SYNC_INTERVAL_SEC.
+static void rtc_auto_sync_task(void *pvParameter)
+{
+    (void)pvParameter;
+
+    time_t last_sync_time = 0;
+
+    for (;;) {
+        time_t now = time(nullptr);
+
+        if (now >= 1600000000) { // system time considered valid
+            // One-time sync per boot after first valid system time
+            if (!s_rtc_auto_synced_this_boot) {
+                std::string err = sync_rtc_from_system_time();
+                if (err.empty()) {
+                    s_rtc_auto_synced_this_boot = true;
+                    last_sync_time = now;
+                    ESP_LOGI(TAG, "RTC auto-sync: completed initial sync after NTP.");
+                } else {
+                    ESP_LOGW(TAG, "RTC auto-sync (initial) failed: %s", err.c_str());
+                }
+            } else {
+                // Periodic sync while running
+                if (last_sync_time == 0 || (now - last_sync_time) >= RTC_AUTO_SYNC_INTERVAL_SEC) {
+                    std::string err = sync_rtc_from_system_time();
+                    if (err.empty()) {
+                        last_sync_time = now;
+                        ESP_LOGI(TAG, "RTC auto-sync: completed periodic sync.");
+                    } else {
+                        ESP_LOGW(TAG, "RTC auto-sync (periodic) failed: %s", err.c_str());
+                    }
+                }
+            }
+        }
+
+        // Check once per minute; this is sufficient for "after NTP" detection and 24h interval.
+        vTaskDelay(pdMS_TO_TICKS(60000));
     }
 }
 
@@ -438,7 +504,51 @@ static void net_event_handler(void* arg, esp_event_base_t event_base,
             if (mqtt_client) esp_mqtt_client_reconnect(mqtt_client);
             xEventGroupSetBits(s_net_event_group, WIFI_CONNECTED_BIT);
         }
+        if (!s_sntp_started) {
+            setenv("TZ", "UTC0", 1);
+            tzset();
+            esp_sntp_config_t sntp_cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+            sntp_cfg.wait_for_sync = false;
+            sntp_cfg.start = true;
+            if (esp_netif_sntp_init(&sntp_cfg) == ESP_OK) {
+                s_sntp_started = true;
+                ESP_LOGI(TAG, "SNTP started (pool.ntp.org), system time will sync from internet");
+            } else {
+                ESP_LOGW(TAG, "SNTP init failed");
+            }
+        }
     }
+}
+
+// Helper used by both manual "Sync RTC" API callback and automatic RTC sync task.
+// Returns empty string on success, or a human-readable error message on failure.
+static std::string sync_rtc_from_system_time()
+{
+    time_t t = time(nullptr);
+    if (t < 1600000000) {  // system time not set or unreasonable (before Sep 2020)
+        return "System time not set or too old. Configure NTP or set time first.";
+    }
+
+    struct tm tm;
+    if (!gmtime_r(&t, &tm)) {
+        return "System time invalid.";
+    }
+
+    if (ds3231_set_time(i2c_bus_handle, &tm) != ESP_OK) {
+        return "RTC write failed (check I2C/DS3231).";
+    }
+
+    struct tm readback;
+    if (ds3231_get_time(i2c_bus_handle, &readback) == ESP_OK) {
+        char buf[32];
+        if (strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S UTC", &readback) > 0) {
+            ESP_LOGI(TAG, "RTC readback after sync: %s", buf);
+            g_rtc_cache = buf;
+            g_rtc_cache_ticks = xTaskGetTickCount();
+        }
+    }
+
+    return "";
 }
 
 #if defined(BOARD_OLIMEX_POE)
@@ -843,6 +953,7 @@ static void load_nodes_from_config(void) {
                         cJSON* mode_item = cJSON_GetObjectItem(entry, "mode");
                         cJSON* label_item = cJSON_GetObjectItem(entry, "label");
                         cJSON* gpio_item = cJSON_GetObjectItem(entry, "gpio");
+                        cJSON* active_high_item = cJSON_GetObjectItem(entry, "active_high");
                         if (cJSON_IsNumber(idx) && idx->valueint >= 0 && idx->valueint < MAX_INPUTS_PER_NODE) {
                             if (cJSON_IsNumber(mode_item))
                                 node.input_modes[idx->valueint] = (uint8_t)(mode_item->valueint & 1);
@@ -852,11 +963,21 @@ static void load_nodes_from_config(void) {
                             }
                             if (cJSON_IsNumber(gpio_item) && ((gpio_item->valueint >= 0 && gpio_item->valueint <= 48) || gpio_item->valueint == 255))
                                 node.input_gpio[idx->valueint] = (uint8_t)(gpio_item->valueint & 0xFF);
+                            if (cJSON_IsBool(active_high_item))
+                                node.input_active_high[idx->valueint] = cJSON_IsTrue(active_high_item) ? 1 : 0;
+                            else if (cJSON_IsNumber(active_high_item))
+                                node.input_active_high[idx->valueint] = (uint8_t)(active_high_item->valueint & 1);
                         }
                     }
                 }
                 item = cJSON_GetObjectItem(node_json, "find_me_output_index");
                 if (item && cJSON_IsNumber(item)) node.find_me_output_index = (uint8_t)(item->valueint & 0xFF);
+                item = cJSON_GetObjectItem(node_json, "can_link_indicator_gpio");
+                if (item && cJSON_IsNumber(item)) node.can_link_indicator_gpio = (uint8_t)(item->valueint & 0xFF);
+                item = cJSON_GetObjectItem(node_json, "night_light_on");
+                if (item && cJSON_IsBool(item)) node.night_light_on = cJSON_IsTrue(item);
+                item = cJSON_GetObjectItem(node_json, "night_light_brightness");
+                if (item && cJSON_IsNumber(item)) node.night_light_brightness = (uint8_t)(item->valueint & 0xFF);
 
                 g_nodes[node.node_id] = node;
             }
@@ -906,6 +1027,12 @@ static void save_nodes_to_config(void) {
             cJSON_AddBoolToObject(node_json, "is_configured", node.is_configured);
             if (node.find_me_output_index != 0xFF)
                 cJSON_AddNumberToObject(node_json, "find_me_output_index", node.find_me_output_index);
+            if (node.can_link_indicator_gpio != 0xFF)
+                cJSON_AddNumberToObject(node_json, "can_link_indicator_gpio", node.can_link_indicator_gpio);
+            if (node.node_type == NODE_TYPE_MECHANICAL) {
+                cJSON_AddBoolToObject(node_json, "night_light_on", node.night_light_on);
+                cJSON_AddNumberToObject(node_json, "night_light_brightness", node.night_light_brightness);
+            }
             int n_in = (node.input_count < MAX_INPUTS_PER_NODE) ? node.input_count : MAX_INPUTS_PER_NODE;
             if (n_in > 0) {
                 cJSON* input_config = cJSON_CreateArray();
@@ -919,6 +1046,7 @@ static void save_nodes_to_config(void) {
                         cJSON_AddStringToObject(entry, "label", node.input_labels[i]);
                     if (node.input_gpio[i] != 0xFF)
                         cJSON_AddNumberToObject(entry, "gpio", node.input_gpio[i]);
+                    cJSON_AddBoolToObject(entry, "active_high", node.input_active_high[i] != 0);
                     cJSON_AddItemToArray(input_config, entry);
                 }
                 cJSON_AddItemToObject(node_json, "input_config", input_config);
@@ -963,6 +1091,12 @@ static cJSON* get_nodes_json_for_config_save(void) {
         cJSON_AddBoolToObject(node_json, "is_configured", node.is_configured);
         if (node.find_me_output_index != 0xFF)
             cJSON_AddNumberToObject(node_json, "find_me_output_index", node.find_me_output_index);
+        if (node.can_link_indicator_gpio != 0xFF)
+            cJSON_AddNumberToObject(node_json, "can_link_indicator_gpio", node.can_link_indicator_gpio);
+        if (node.node_type == NODE_TYPE_MECHANICAL) {
+            cJSON_AddBoolToObject(node_json, "night_light_on", node.night_light_on);
+            cJSON_AddNumberToObject(node_json, "night_light_brightness", node.night_light_brightness);
+        }
         int n_in = (node.input_count < MAX_INPUTS_PER_NODE) ? node.input_count : MAX_INPUTS_PER_NODE;
         if (n_in > 0) {
             cJSON* input_config = cJSON_CreateArray();
@@ -976,6 +1110,7 @@ static cJSON* get_nodes_json_for_config_save(void) {
                     cJSON_AddStringToObject(entry, "label", node.input_labels[i]);
                 if (node.input_gpio[i] != 0xFF)
                     cJSON_AddNumberToObject(entry, "gpio", node.input_gpio[i]);
+                cJSON_AddBoolToObject(entry, "active_high", node.input_active_high[i] != 0);
                 cJSON_AddItemToArray(input_config, entry);
             }
             cJSON_AddItemToObject(node_json, "input_config", input_config);
@@ -1020,6 +1155,7 @@ static cJSON* get_nodes_json(void) {
                         cJSON* mode_item = cJSON_GetObjectItem(entry, "mode");
                         cJSON* label_item = cJSON_GetObjectItem(entry, "label");
                         cJSON* gpio_item = cJSON_GetObjectItem(entry, "gpio");
+                        cJSON* active_high_item = cJSON_GetObjectItem(entry, "active_high");
                         if (cJSON_IsNumber(idx) && idx->valueint >= 0 && idx->valueint < MAX_INPUTS_PER_NODE) {
                             if (cJSON_IsNumber(mode_item))
                                 node.input_modes[idx->valueint] = (uint8_t)(mode_item->valueint & 1);
@@ -1029,11 +1165,21 @@ static cJSON* get_nodes_json(void) {
                             }
                             if (cJSON_IsNumber(gpio_item) && ((gpio_item->valueint >= 0 && gpio_item->valueint <= 48) || gpio_item->valueint == 255))
                                 node.input_gpio[idx->valueint] = (uint8_t)(gpio_item->valueint & 0xFF);
+                            if (cJSON_IsBool(active_high_item))
+                                node.input_active_high[idx->valueint] = cJSON_IsTrue(active_high_item) ? 1 : 0;
+                            else if (cJSON_IsNumber(active_high_item))
+                                node.input_active_high[idx->valueint] = (uint8_t)(active_high_item->valueint & 1);
                         }
                     }
                 }
                 item = cJSON_GetObjectItem(node_json, "find_me_output_index");
                 if (item && cJSON_IsNumber(item)) node.find_me_output_index = (uint8_t)(item->valueint & 0xFF);
+                item = cJSON_GetObjectItem(node_json, "can_link_indicator_gpio");
+                if (item && cJSON_IsNumber(item)) node.can_link_indicator_gpio = (uint8_t)(item->valueint & 0xFF);
+                item = cJSON_GetObjectItem(node_json, "night_light_on");
+                if (item && cJSON_IsBool(item)) node.night_light_on = cJSON_IsTrue(item);
+                item = cJSON_GetObjectItem(node_json, "night_light_brightness");
+                if (item && cJSON_IsNumber(item)) node.night_light_brightness = (uint8_t)(item->valueint & 0xFF);
                 merged[node.node_id] = node;
             }
         }
@@ -1079,6 +1225,12 @@ static cJSON* get_nodes_json(void) {
         cJSON_AddStringToObject(node_json, "type_string", type_str);
         if (node.find_me_output_index != 0xFF)
             cJSON_AddNumberToObject(node_json, "find_me_output_index", node.find_me_output_index);
+        if (node.can_link_indicator_gpio != 0xFF)
+            cJSON_AddNumberToObject(node_json, "can_link_indicator_gpio", node.can_link_indicator_gpio);
+        if (node.node_type == NODE_TYPE_MECHANICAL) {
+            cJSON_AddBoolToObject(node_json, "night_light_on", node.night_light_on);
+            cJSON_AddNumberToObject(node_json, "night_light_brightness", node.night_light_brightness);
+        }
 
         int n_in = (node.input_count < MAX_INPUTS_PER_NODE) ? node.input_count : MAX_INPUTS_PER_NODE;
         if (n_in > 0) {
@@ -1093,6 +1245,7 @@ static cJSON* get_nodes_json(void) {
                     cJSON_AddStringToObject(entry, "label", node.input_labels[i]);
                 if (node.input_gpio[i] != 0xFF)
                     cJSON_AddNumberToObject(entry, "gpio", node.input_gpio[i]);
+                cJSON_AddBoolToObject(entry, "active_high", node.input_active_high[i] != 0);
                 cJSON_AddItemToArray(input_config, entry);
             }
             cJSON_AddItemToObject(node_json, "input_config", input_config);
@@ -1158,6 +1311,40 @@ extern "C" void app_main(void) {
     api_init.set_node_input_label_cb = [](uint8_t node_id, uint8_t input_index, const char* label) {
         set_node_input_label_impl(node_id, input_index, label ? label : "");
     };
+    api_init.sync_time_to_rtc_cb = []() -> std::string {
+        return sync_rtc_from_system_time();
+    };
+    api_init.get_rtc_time_cb = []() {
+        if (!ds3231_probe(i2c_bus_handle)) return std::string("");
+        struct tm rtc_tm;
+        char buf[32];
+        std::string first_stale;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (attempt > 0) vTaskDelay(pdMS_TO_TICKS(100));
+            if (ds3231_get_time(i2c_bus_handle, &rtc_tm) != ESP_OK) break;
+            if (strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S UTC", &rtc_tm) <= 0) break;
+            int year = rtc_tm.tm_year + 1900;
+            if (year >= 2020) {
+                g_rtc_cache = buf;
+                g_rtc_cache_ticks = xTaskGetTickCount();
+                return std::string(buf);
+            }
+            if (first_stale.empty()) first_stale = buf;
+        }
+        /* Live read was stale; return recent cache from boot if available so UI shows correct time */
+        if (!g_rtc_cache.empty() && (xTaskGetTickCount() - g_rtc_cache_ticks) < g_rtc_cache_max_age_ticks)
+            return g_rtc_cache;
+        return first_stale.empty() ? std::string("") : first_stale;
+    };
+    api_init.get_system_time_cb = []() {
+        time_t t = time(nullptr);
+        if (t < 0) return std::string("");
+        struct tm tm;
+        if (!gmtime_r(&t, &tm)) return std::string("");
+        char buf[32];
+        if (strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S UTC", &tm) <= 0) return std::string("");
+        return std::string(buf);
+    };
 
     HSG::API::start(api_init);
     HSG::API::mqtt_start();
@@ -1165,10 +1352,50 @@ extern "C" void app_main(void) {
     ESP_ERROR_CHECK(i2c_master_init());
     ESP_LOGI(TAG, "I2C ready: SDA=%d SCL=%d @%dHz", I2C_MASTER_SDA_IO, I2C_MASTER_SCL_IO, I2C_MASTER_FREQ_HZ);
 
+    vTaskDelay(pdMS_TO_TICKS(200));
+    if (ds3231_probe(i2c_bus_handle)) {
+        struct tm rtc_first, rtc_second;
+        int rtc_reads_consistent = 0;
+        if (ds3231_get_time(i2c_bus_handle, &rtc_first) == ESP_OK) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            if (ds3231_get_time(i2c_bus_handle, &rtc_second) == ESP_OK) {
+                time_t t1 = mktime(&rtc_first), t2 = mktime(&rtc_second);
+                rtc_reads_consistent = (t1 != (time_t)-1 && t2 != (time_t)-1 && (t1 >= t2 ? t1 - t2 : t2 - t1) <= 2);
+            }
+            uint8_t status = 0;
+            ds3231_get_status(i2c_bus_handle, &status);
+            int osf_set = (status & 0x80) ? 1 : 0;
+            char rtc_buf[32];
+            if (strftime(rtc_buf, sizeof(rtc_buf), "%Y-%m-%d %H:%M:%S UTC", &rtc_first) > 0)
+                ESP_LOGI(TAG, "RTC time at boot: %s (OSF=%d; OSF=1 means oscillator had stopped, e.g. power glitch or battery not maintaining)", rtc_buf, osf_set);
+            setenv("TZ", "UTC0", 1);
+            tzset();
+            int rtc_year = rtc_first.tm_year + 1900;
+            if (rtc_year < 2020)
+                ESP_LOGI(TAG, "RTC time stale (year=%d), skipping set system time; use NTP then Sync RTC", rtc_year);
+            else if (!rtc_reads_consistent)
+                ESP_LOGW(TAG, "RTC read inconsistent, not setting system time");
+            else {
+                time_t t = mktime(&rtc_first);
+                if (t != (time_t)-1) {
+                    struct timeval tv = { .tv_sec = t, .tv_usec = 0 };
+                    if (settimeofday(&tv, NULL) == 0) {
+                        ESP_LOGI(TAG, "System time set from DS3231 RTC");
+                        g_rtc_cache = rtc_buf;
+                        g_rtc_cache_ticks = xTaskGetTickCount();
+                    } else
+                        ESP_LOGW(TAG, "settimeofday failed");
+                }
+            }
+        } else
+            ESP_LOGW(TAG, "DS3231 read failed");
+    } else
+        ESP_LOGI(TAG, "DS3231 not found, skipping RTC time set");
+
     cJSON* initial_config = HSG::API::get_config_json_obj();
     ESP_ERROR_CHECK(hsg_outputs_init(I2C_MASTER_NUM, initial_config));
     hsg_outputs_clear_all();
-    
+
     // Now that the API has loaded the config, we can init the outputs
    // HSG::API::scan_and_prune_i2c(I2C_MASTER_NUM);
     cJSON_Delete(initial_config); // Clean up
@@ -1183,7 +1410,7 @@ extern "C" void app_main(void) {
     load_nodes_from_config();
 
     ESP_LOGI(TAG, "app_main() Initialization complete.");
-    
+
     esp_task_wdt_deinit();
 
     esp_task_wdt_config_t twdt_config = {
@@ -1197,7 +1424,10 @@ extern "C" void app_main(void) {
     xTaskCreatePinnedToCore(main_task, "can_gateway", 4096, NULL, 15, NULL, 1);
     xTaskCreate(can_processing_task, "can_logic", 4096, NULL, 5, NULL);
     xTaskCreate(animation_task, "animation_task", 4096, NULL, 5, NULL);
-    
+
+    // Background RTC auto-sync task: performs a one-time sync after NTP has set
+    // system time, then re-syncs periodically every RTC_AUTO_SYNC_INTERVAL_SEC.
+    xTaskCreatePinnedToCore(rtc_auto_sync_task, "rtc_auto_sync_task", 4096, NULL, 4, NULL, 1);
 }
 
 bool initialize_mcp2515_with_retry() {
@@ -1298,6 +1528,19 @@ static void send_node_state_feedback(uint8_t node_id, const uint8_t payload[4]) 
     }
 }
 
+// Send SENSOR_DATA (0x2) link keepalive to one node (mechanical nodes use this for CAN link LED).
+static void send_sensor_data_link_to_node(uint8_t node_id) {
+    if (!mcp2515_ptr || !g_can_send_mutex) return;
+    can_frame frame = {};
+    frame.can_id = createCanId(SENSOR_DATA, node_id);
+    frame.can_dlc = 1;
+    frame.data[0] = 0x00;
+    if (xSemaphoreTake(g_can_send_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        mcp2515_ptr->sendMessage(&frame);
+        xSemaphoreGive(g_can_send_mutex);
+    }
+}
+
 // Build per-button brightness for one LCD node from bindings and output state; send NODE_STATE_FEEDBACK (throttled).
 static void maybe_send_feedback_to_node(uint8_t node_id) {
     static std::map<uint8_t, int64_t> s_last_feedback_us;
@@ -1329,6 +1572,38 @@ static void maybe_send_feedback_to_node(uint8_t node_id) {
     send_node_state_feedback(node_id, payload);
 }
 
+// Get configured timezone string from hub config (for sending to LCD nodes).
+static std::string get_hub_timezone_string(void) {
+    cJSON* config = HSG::API::get_config_json_obj();
+    if (!config) return "UTC";
+    cJSON* sys = cJSON_GetObjectItem(config, "system");
+    cJSON* tz_item = sys ? cJSON_GetObjectItem(sys, "timezone") : nullptr;
+    std::string out = "UTC";
+    if (tz_item && cJSON_IsString(tz_item) && tz_item->valuestring && tz_item->valuestring[0])
+        out = tz_item->valuestring;
+    cJSON_Delete(config);
+    return out;
+}
+
+// Send CMD_SET_TIMEZONE to one node (multi-frame: 6 chars per frame, same pattern as labels).
+static void send_timezone_to_node(uint8_t node_id, const char* tz_str) {
+    if (!tz_str) return;
+    size_t tz_len = strnlen(tz_str, 41);
+    if (tz_len > 40) tz_len = 40;
+    const size_t chunk = 6;
+    uint8_t payload[7];
+    for (size_t offset = 0; offset < tz_len || offset == 0; offset += chunk) {
+        payload[0] = (offset == 0) ? (uint8_t)tz_len : (uint8_t)0xFF;
+        size_t n = 0;
+        for (; n < chunk && offset + n < tz_len; n++)
+            payload[1 + n] = (uint8_t)tz_str[offset + n];
+        for (; n < chunk; n++)
+            payload[1 + n] = 0;
+        send_node_config(node_id, CMD_SET_TIMEZONE, payload, sizeof(payload));
+        if (tz_len == 0) break;
+    }
+}
+
 static void send_node_config(uint8_t target_node_id, uint8_t cmd, const uint8_t* data, size_t len) {
     if (!mcp2515_ptr) {
         ESP_LOGW(TAG, "send_node_config: CAN not available");
@@ -1356,6 +1631,8 @@ static void send_node_config(uint8_t target_node_id, uint8_t cmd, const uint8_t*
                         it->second.input_modes[data[0]] = data[2] & 1;
                         if (len >= 4)
                             it->second.input_gpio[data[0]] = data[3];
+                        if (len >= 5)
+                            it->second.input_active_high[data[0]] = data[4] & 1;
                         ESP_LOGI(TAG, "input_modes[%u]=%u for node %u", (unsigned)data[0], (unsigned)(data[2] & 1), (unsigned)target_node_id);
                     }
                     xSemaphoreGive(g_nodes_mutex);
@@ -1384,6 +1661,32 @@ static void send_node_config(uint8_t target_node_id, uint8_t cmd, const uint8_t*
                     if (it != g_nodes.end()) {
                         it->second.find_me_output_index = data[0];
                         ESP_LOGI(TAG, "find_me_output_index=%u for node %u", (unsigned)data[0], (unsigned)target_node_id);
+                    }
+                    xSemaphoreGive(g_nodes_mutex);
+                    save_nodes_to_config();
+                }
+            }
+            if (cmd == CMD_SET_CAN_LINK_INDICATOR && len >= 1 && data) {
+                if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
+                    auto it = g_nodes.find(target_node_id);
+                    if (it != g_nodes.end()) {
+                        it->second.can_link_indicator_gpio = data[0];
+                        ESP_LOGI(TAG, "can_link_indicator_gpio=%u for node %u", (unsigned)data[0], (unsigned)target_node_id);
+                    }
+                    xSemaphoreGive(g_nodes_mutex);
+                    save_nodes_to_config();
+                }
+            }
+            if (cmd == CMD_SET_NIGHT_LIGHT && len >= 2 && data) {
+                uint8_t enabled = data[0] ? 1 : 0;
+                uint8_t brightness = data[1];
+                if (brightness > 100) brightness = 100;
+                if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
+                    auto it = g_nodes.find(target_node_id);
+                    if (it != g_nodes.end()) {
+                        it->second.night_light_on = (enabled != 0);
+                        it->second.night_light_brightness = brightness;
+                        ESP_LOGI(TAG, "night_light %s brightness=%u for node %u", enabled ? "on" : "off", (unsigned)brightness, (unsigned)target_node_id);
                     }
                     xSemaphoreGive(g_nodes_mutex);
                     save_nodes_to_config();
@@ -1516,13 +1819,19 @@ void can_processing_task(void *pvParameter) {
                     // Update node registry
                     bool removed_stale = false;
                     bool is_new = false;
+                    bool lcd_just_came_online = false;  // true if LCD node was offline and we should push time
                     if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
                         is_new = (g_nodes.find(nodeId) == g_nodes.end());
                         NodeInfo& node = g_nodes[nodeId];
+                        int64_t prev_seen = node.last_seen_timestamp_us;
                         node.node_id = nodeId;
                         node.node_type = node_type;
                         node.input_count = input_count;
                         node.last_seen_timestamp_us = current_time_us;
+                        if (node_type == NODE_TYPE_LCD && nodeId != NODE_ID_UNCONFIGURED &&
+                            (is_new || prev_seen == 0 || (current_time_us - prev_seen) > 30000000 ||
+                             current_time_us < 120000000))  // 120 s: always push time for first 2 min after hub boot
+                            lcd_just_came_online = true;
                         node.is_configured = (nodeId != NODE_ID_UNCONFIGURED);
                         
                         if (nodeId == NODE_ID_UNCONFIGURED) {
@@ -1552,6 +1861,20 @@ void can_processing_task(void *pvParameter) {
                         }
                         
                         xSemaphoreGive(g_nodes_mutex);
+                        
+                        if (lcd_just_came_online) {
+                            std::string tz = get_hub_timezone_string();
+                            send_timezone_to_node(nodeId, tz.c_str());
+                            time_t t = time(nullptr);
+                            uint32_t ts = (uint32_t)t;
+                            uint8_t datetime_payload[4] = {
+                                (uint8_t)(ts & 0xFF),
+                                (uint8_t)((ts >> 8) & 0xFF),
+                                (uint8_t)((ts >> 16) & 0xFF),
+                                (uint8_t)((ts >> 24) & 0xFF)
+                            };
+                            send_node_config(nodeId, CMD_SET_DATETIME, datetime_payload, sizeof(datetime_payload));
+                        }
                         
                         // If this HEARTBEAT is from a node we just reconfigured (old_id -> nodeId), remove old_id permanently (outside g_nodes_mutex to avoid deadlock)
                         if (nodeId != NODE_ID_UNCONFIGURED && g_pending_reconfig_mutex && xSemaphoreTake(g_pending_reconfig_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
@@ -1631,6 +1954,7 @@ void test_can_hardware() {
     
     ESP_LOGI(TAG, "=== End Diagnostic ===");
 }
+
 /*--------------------------- Main Application Task -------------------------*/
 void main_task(void *pvParameter)
 {
@@ -1661,6 +1985,9 @@ void main_task(void *pvParameter)
     
     ESP_ERROR_CHECK(gpio_isr_handler_add((gpio_num_t)CAN_INT_GPIO, gpio_isr_handler, (void*)CAN_INT_GPIO));
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
+    // Let SPI/CAN settle before first transaction to avoid spi_master assert on early use
+    if (can_available)
+        vTaskDelay(pdMS_TO_TICKS(500));
     while (1) {
         // "Pet the dog" at the start of every loop
         ESP_ERROR_CHECK(esp_task_wdt_reset());
@@ -1742,22 +2069,50 @@ void animation_task(void *pvParameter)
             }
             cJSON_Delete(root);
 
-            // Send NODE_STATE_FEEDBACK to each LCD node (throttled inside maybe_send_feedback_to_node)
-            if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+            // Defer all CAN (SPI) sends for a few seconds after boot to avoid spi_master assert on first transactions.
+            const uint32_t CAN_SEND_DEFER_MS = 5000;
+            if (now < CAN_SEND_DEFER_MS)
+                /* skip CAN sends */ ;
+            else if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
                 std::vector<uint8_t> lcd_nodes;
+                std::vector<uint8_t> mechanical_nodes;
                 for (const auto& pair : g_nodes) {
                     if (pair.second.node_type == NODE_TYPE_LCD && pair.second.node_id != NODE_ID_UNCONFIGURED)
                         lcd_nodes.push_back(pair.second.node_id);
+                    if (pair.second.node_type == NODE_TYPE_MECHANICAL && pair.second.node_id != NODE_ID_UNCONFIGURED)
+                        mechanical_nodes.push_back(pair.second.node_id);
                 }
                 xSemaphoreGive(g_nodes_mutex);
                 for (uint8_t nid : lcd_nodes)
                     maybe_send_feedback_to_node(nid);
 
-                // Send date/time to each LCD node every hour (Unix timestamp)
+                // Send SENSOR_DATA (0x2) link keepalive to mechanical nodes every 7 s so their CAN link LED matches hub online state.
+                // Delay between each send to avoid back-to-back SPI transactions (spi_master assert ret_trans == trans_desc).
+                static uint32_t last_mechanical_link_ms = 0;
+                const uint32_t MECHANICAL_LINK_INTERVAL_MS = 7000;
+                if (now - last_mechanical_link_ms >= MECHANICAL_LINK_INTERVAL_MS && !mechanical_nodes.empty()) {
+                    for (uint8_t nid : mechanical_nodes) {
+                        send_sensor_data_link_to_node(nid);
+                        vTaskDelay(pdMS_TO_TICKS(5));
+                    }
+                    last_mechanical_link_ms = now;
+                }
+
+                // Send date/time to LCD nodes: every 2s for first 60s (so node gets time soon after boot), then every hour
                 static uint32_t datetime_send_counter = 0;
+                const uint32_t loops_per_second = 1000 / 16;  // ~62
+                const uint32_t loops_per_2s = 2 * loops_per_second;
+                const uint32_t loops_60s = 60 * loops_per_second;
                 datetime_send_counter++;
-                if (datetime_send_counter >= 36000) {  // 100ms * 36000 = 1 hour
+                bool send_now = false;
+                if (datetime_send_counter < loops_60s && (datetime_send_counter % loops_per_2s) == 0)
+                    send_now = true;
+                if (datetime_send_counter >= 36000) {  // ~every hour
                     datetime_send_counter = 0;
+                    send_now = true;
+                }
+                if (send_now && !lcd_nodes.empty()) {
+                    std::string tz = get_hub_timezone_string();
                     time_t t = time(nullptr);
                     uint32_t ts = (uint32_t)t;
                     uint8_t datetime_payload[4] = {
@@ -1766,8 +2121,10 @@ void animation_task(void *pvParameter)
                         (uint8_t)((ts >> 16) & 0xFF),
                         (uint8_t)((ts >> 24) & 0xFF)
                     };
-                    for (uint8_t nid : lcd_nodes)
+                    for (uint8_t nid : lcd_nodes) {
+                        send_timezone_to_node(nid, tz.c_str());
                         send_node_config(nid, CMD_SET_DATETIME, datetime_payload, sizeof(datetime_payload));
+                    }
                 }
             }
         }

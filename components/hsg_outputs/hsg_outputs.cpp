@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <set>
+#include <cstdio>
 
 static const char* TAG = "HSG-OUTPUTS";
 
@@ -114,13 +115,22 @@ bool hsg_outputs_get_mapping(int output_num, uint8_t* addr, uint8_t* channel) {
 
 void hsg_outputs_clear_all() {
     ESP_LOGI(TAG, "Clearing all physical PWM outputs...");
-    // The valid address range for PCA9685 chips is 0x40 to 0x7F
-    for (uint8_t addr = 0x40; addr <= 0x7F; ++addr) {
-        // We don't know which addresses are populated, so we just send the command to all of them.
-        // If a device exists at the address, it will respond. If not, the command is ignored.
-        // A more advanced way would be to probe first, but this is simple and effective.
+    // Only clear addresses that are configured PCA9685 devices (from g_mappings).
+    // Do NOT iterate 0x40-0x7F: 0x68/0x69 are the DS3231 RTC; writing PCA9685
+    // registers there corrupts the RTC time.
+    std::set<uint8_t> addresses;
+    for (const auto& map : g_mappings) {
+        addresses.insert(map.i2c_addr);
+    }
+    char addrs_buf[64];
+    int n = 0;
+    for (uint8_t a : addresses) {
+        n += snprintf(addrs_buf + n, sizeof(addrs_buf) - n, "0x%02X ", a);
+        if (n >= (int)sizeof(addrs_buf) - 8) break;
+    }
+    ESP_LOGI(TAG, "Clearing only configured PCA9685 addrs: %s (not 0x68/0x69 RTC)", addrs_buf);
+    for (uint8_t addr : addresses) {
         for (uint8_t channel = 0; channel < 16; ++channel) {
-            // g_i2c_port is set during hsg_outputs_init()
             hsg_pca9685::pca9685_write_pwm_value(addr, channel, 0);
         }
     }

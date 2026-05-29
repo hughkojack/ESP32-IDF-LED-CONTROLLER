@@ -47,6 +47,12 @@ struct Init {
     std::function<bool(uint8_t node_id)> remove_node_cb;
     // Set per-input label for a node (hub stores, persists, and sends CMD_SET_INPUT_LABEL to node). label can be empty.
     std::function<void(uint8_t node_id, uint8_t input_index, const char* label)> set_node_input_label_cb;
+    // Write current system time to DS3231 RTC. Returns empty string on success, or an error message. Optional (no-op if not set).
+    std::function<std::string()> sync_time_to_rtc_cb;
+    // Return current RTC date/time string for display (e.g. "2025-03-14 12:34:56 UTC"), or empty if unavailable.
+    std::function<std::string()> get_rtc_time_cb;
+    // Return current hub (system) time string for display. Optional.
+    std::function<std::string()> get_system_time_cb;
 };
 
 esp_err_t register_uris(httpd_handle_t server, const Init& init);

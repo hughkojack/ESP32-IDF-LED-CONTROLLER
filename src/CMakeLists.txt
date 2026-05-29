@@ -23,6 +23,7 @@ idf_component_register(
     PRIV_REQUIRES
         hsg_api
         hsg_outputs
+        ds3231
         esp32-mcp2515
         mqtt
         driver
