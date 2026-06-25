@@ -41,6 +41,7 @@ extern "C" {
 #endif
 
 #include "can_protocol.h"
+#include "can_tunnel.h"
 #include "HSG-API.h"
 #include "hsg_outputs.h"
 #include "hsg_pca9685.h"
@@ -111,6 +112,52 @@ static std::vector<Binding> g_bindings;
 // Node tracking structure
 #define MAX_INPUTS_PER_NODE 6  // inputs per node 1..6
 #define MAX_INPUT_LABEL_LEN 24
+
+struct Ws2812EffectParams {
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    uint16_t timing_ms;
+};
+
+static void ws2812_effect_params_set_defaults(Ws2812EffectParams* p, uint8_t effect_id) {
+    if (!p) return;
+    switch (effect_id) {
+        case 0: *p = {220, 180, 80, 45}; break;
+        case 1: *p = {80, 60, 24, 50}; break;
+        case 2: *p = {180, 120, 20, 150}; break;
+        default: *p = {0, 0, 0, 100}; break;
+    }
+}
+
+static void load_ws2812_effect_from_json(Ws2812EffectParams* out, cJSON* obj, uint8_t effect_id) {
+    ws2812_effect_params_set_defaults(out, effect_id);
+    if (!obj || !cJSON_IsObject(obj)) return;
+    cJSON* item = cJSON_GetObjectItem(obj, "r");
+    if (item && cJSON_IsNumber(item)) out->r = (uint8_t)(item->valueint & 0xFF);
+    item = cJSON_GetObjectItem(obj, "g");
+    if (item && cJSON_IsNumber(item)) out->g = (uint8_t)(item->valueint & 0xFF);
+    item = cJSON_GetObjectItem(obj, "b");
+    if (item && cJSON_IsNumber(item)) out->b = (uint8_t)(item->valueint & 0xFF);
+    item = cJSON_GetObjectItem(obj, "timing_ms");
+    if (item && cJSON_IsNumber(item)) {
+        int t = item->valueint;
+        if (t < 10) t = 10;
+        if (t > 2000) t = 2000;
+        out->timing_ms = (uint16_t)t;
+    }
+}
+
+static void add_ws2812_effect_to_json(cJSON* parent, const char* name, const Ws2812EffectParams& p) {
+    cJSON* obj = cJSON_CreateObject();
+    if (!obj) return;
+    cJSON_AddNumberToObject(obj, "r", p.r);
+    cJSON_AddNumberToObject(obj, "g", p.g);
+    cJSON_AddNumberToObject(obj, "b", p.b);
+    cJSON_AddNumberToObject(obj, "timing_ms", p.timing_ms);
+    cJSON_AddItemToObject(parent, name, obj);
+}
+
 struct NodeInfo {
     uint8_t node_id;
     uint8_t node_type;  // NODE_TYPE_LCD or NODE_TYPE_MECHANICAL
@@ -132,8 +179,19 @@ struct NodeInfo {
     // WS2812 night light (mechanical node)
     bool night_light_on;
     uint8_t night_light_brightness;
+    uint8_t ws2812_click_effect;  // 0=strobe, 1=chase
+    Ws2812EffectParams ws2812_strobe;
+    Ws2812EffectParams ws2812_chase;
+    Ws2812EffectParams ws2812_find_me;
+    uint16_t fw_version;
+    uint8_t ota_capable;
+    char last_ota_result[32];
 
-    NodeInfo() : node_id(0), node_type(0), input_count(0), last_seen_timestamp_us(0), is_configured(false), find_me_output_index(0xFF), can_link_indicator_gpio(0xFF), night_light_on(false), night_light_brightness(0) {
+    NodeInfo() : node_id(0), node_type(0), input_count(0), last_seen_timestamp_us(0), is_configured(false), find_me_output_index(0xFF), can_link_indicator_gpio(0xFF), night_light_on(false), night_light_brightness(0), ws2812_click_effect(0), fw_version(0), ota_capable(0) {
+        last_ota_result[0] = '\0';
+        ws2812_effect_params_set_defaults(&ws2812_strobe, 0);
+        ws2812_effect_params_set_defaults(&ws2812_chase, 1);
+        ws2812_effect_params_set_defaults(&ws2812_find_me, 2);
         for (int i = 0; i < MAX_INPUTS_PER_NODE; i++) {
             input_modes[i] = 0xFF;
             input_labels[i][0] = '\0';
@@ -142,6 +200,26 @@ struct NodeInfo {
         }
     }
 };
+
+static void load_ws2812_effects_from_json(NodeInfo& node, cJSON* node_json) {
+    ws2812_effect_params_set_defaults(&node.ws2812_strobe, 0);
+    ws2812_effect_params_set_defaults(&node.ws2812_chase, 1);
+    ws2812_effect_params_set_defaults(&node.ws2812_find_me, 2);
+    cJSON* fx = cJSON_GetObjectItem(node_json, "ws2812_effects");
+    if (!fx || !cJSON_IsObject(fx)) return;
+    load_ws2812_effect_from_json(&node.ws2812_strobe, cJSON_GetObjectItem(fx, "strobe"), 0);
+    load_ws2812_effect_from_json(&node.ws2812_chase, cJSON_GetObjectItem(fx, "chase"), 1);
+    load_ws2812_effect_from_json(&node.ws2812_find_me, cJSON_GetObjectItem(fx, "find_me"), 2);
+}
+
+static void add_ws2812_effects_json(cJSON* node_json, const NodeInfo& node) {
+    cJSON* fx = cJSON_CreateObject();
+    if (!fx) return;
+    add_ws2812_effect_to_json(fx, "strobe", node.ws2812_strobe);
+    add_ws2812_effect_to_json(fx, "chase", node.ws2812_chase);
+    add_ws2812_effect_to_json(fx, "find_me", node.ws2812_find_me);
+    cJSON_AddItemToObject(node_json, "ws2812_effects", fx);
+}
 
 // Node registry: map from node_id to NodeInfo
 static std::map<uint8_t, NodeInfo> g_nodes;
@@ -188,6 +266,7 @@ static bool remove_node_from_registry(uint8_t node_id);
 static void w5500_hardware_reset();
 void set_esp32_mac_on_w5500(esp_eth_handle_t eth_handle);
 static std::string sync_rtc_from_system_time();
+static void format_fw_version(uint16_t ver, char* out, size_t out_len);
 
 // --- Core Logic ---
 void setOutput(int output, int brightness, int fadeMs, unsigned long startTimeOffset) {
@@ -832,9 +911,10 @@ static esp_err_t can_module_init(void) {
     
     spi_device_interface_config_t can_devcfg = {
         .mode = 0,                         // SPI mode 0
-        .clock_speed_hz = 10 * 1000 * 1000, // Clock speed is 10 MHz
+        .clock_speed_hz = 5 * 1000 * 1000, // 5 MHz — MCP2515 margin on shared bus
+        .input_delay_ns = 50,
         .spics_io_num = CAN_CS_GPIO,
-        .queue_size = 10,                   // We wish to be able to queue 10 transactions at a time
+        .queue_size = 10,
     };
 
     //Attach the MCP2515 to the SPI bus
@@ -971,13 +1051,27 @@ static void load_nodes_from_config(void) {
                     }
                 }
                 item = cJSON_GetObjectItem(node_json, "find_me_output_index");
-                if (item && cJSON_IsNumber(item)) node.find_me_output_index = (uint8_t)(item->valueint & 0xFF);
+                if (node.node_type == NODE_TYPE_MECHANICAL) {
+                    node.find_me_output_index = 0xFF;
+                } else if (item && cJSON_IsNumber(item)) {
+                    node.find_me_output_index = (uint8_t)(item->valueint & 0xFF);
+                }
                 item = cJSON_GetObjectItem(node_json, "can_link_indicator_gpio");
                 if (item && cJSON_IsNumber(item)) node.can_link_indicator_gpio = (uint8_t)(item->valueint & 0xFF);
                 item = cJSON_GetObjectItem(node_json, "night_light_on");
                 if (item && cJSON_IsBool(item)) node.night_light_on = cJSON_IsTrue(item);
                 item = cJSON_GetObjectItem(node_json, "night_light_brightness");
                 if (item && cJSON_IsNumber(item)) node.night_light_brightness = (uint8_t)(item->valueint & 0xFF);
+                item = cJSON_GetObjectItem(node_json, "ws2812_click_effect");
+                if (item && cJSON_IsNumber(item)) node.ws2812_click_effect = (item->valueint != 0) ? 1 : 0;
+                load_ws2812_effects_from_json(node, node_json);
+                item = cJSON_GetObjectItem(node_json, "fw_version");
+                if (item && cJSON_IsNumber(item)) node.fw_version = (uint16_t)item->valueint;
+                item = cJSON_GetObjectItem(node_json, "ota_capable");
+                if (item && cJSON_IsNumber(item)) node.ota_capable = (uint8_t)(item->valueint & 1);
+                item = cJSON_GetObjectItem(node_json, "last_ota_result");
+                if (item && cJSON_IsString(item) && item->valuestring)
+                    strncpy(node.last_ota_result, item->valuestring, sizeof(node.last_ota_result) - 1);
 
                 g_nodes[node.node_id] = node;
             }
@@ -1025,13 +1119,19 @@ static void save_nodes_to_config(void) {
             cJSON_AddNumberToObject(node_json, "input_count", node.input_count);
             cJSON_AddNumberToObject(node_json, "last_seen", (double)node.last_seen_timestamp_us);
             cJSON_AddBoolToObject(node_json, "is_configured", node.is_configured);
-            if (node.find_me_output_index != 0xFF)
+            if (node.node_type != NODE_TYPE_MECHANICAL && node.find_me_output_index != 0xFF)
                 cJSON_AddNumberToObject(node_json, "find_me_output_index", node.find_me_output_index);
             if (node.can_link_indicator_gpio != 0xFF)
                 cJSON_AddNumberToObject(node_json, "can_link_indicator_gpio", node.can_link_indicator_gpio);
             if (node.node_type == NODE_TYPE_MECHANICAL) {
                 cJSON_AddBoolToObject(node_json, "night_light_on", node.night_light_on);
                 cJSON_AddNumberToObject(node_json, "night_light_brightness", node.night_light_brightness);
+                cJSON_AddNumberToObject(node_json, "ws2812_click_effect", node.ws2812_click_effect);
+                add_ws2812_effects_json(node_json, node);
+                cJSON_AddNumberToObject(node_json, "fw_version", node.fw_version);
+                cJSON_AddNumberToObject(node_json, "ota_capable", node.ota_capable);
+                if (node.last_ota_result[0] != '\0')
+                    cJSON_AddStringToObject(node_json, "last_ota_result", node.last_ota_result);
             }
             int n_in = (node.input_count < MAX_INPUTS_PER_NODE) ? node.input_count : MAX_INPUTS_PER_NODE;
             if (n_in > 0) {
@@ -1089,13 +1189,19 @@ static cJSON* get_nodes_json_for_config_save(void) {
         cJSON_AddNumberToObject(node_json, "input_count", node.input_count);
         cJSON_AddNumberToObject(node_json, "last_seen", (double)node.last_seen_timestamp_us);
         cJSON_AddBoolToObject(node_json, "is_configured", node.is_configured);
-        if (node.find_me_output_index != 0xFF)
+        if (node.node_type != NODE_TYPE_MECHANICAL && node.find_me_output_index != 0xFF)
             cJSON_AddNumberToObject(node_json, "find_me_output_index", node.find_me_output_index);
         if (node.can_link_indicator_gpio != 0xFF)
             cJSON_AddNumberToObject(node_json, "can_link_indicator_gpio", node.can_link_indicator_gpio);
         if (node.node_type == NODE_TYPE_MECHANICAL) {
             cJSON_AddBoolToObject(node_json, "night_light_on", node.night_light_on);
             cJSON_AddNumberToObject(node_json, "night_light_brightness", node.night_light_brightness);
+            cJSON_AddNumberToObject(node_json, "ws2812_click_effect", node.ws2812_click_effect);
+            add_ws2812_effects_json(node_json, node);
+            cJSON_AddNumberToObject(node_json, "fw_version", node.fw_version);
+            cJSON_AddNumberToObject(node_json, "ota_capable", node.ota_capable);
+            if (node.last_ota_result[0] != '\0')
+                cJSON_AddStringToObject(node_json, "last_ota_result", node.last_ota_result);
         }
         int n_in = (node.input_count < MAX_INPUTS_PER_NODE) ? node.input_count : MAX_INPUTS_PER_NODE;
         if (n_in > 0) {
@@ -1173,13 +1279,27 @@ static cJSON* get_nodes_json(void) {
                     }
                 }
                 item = cJSON_GetObjectItem(node_json, "find_me_output_index");
-                if (item && cJSON_IsNumber(item)) node.find_me_output_index = (uint8_t)(item->valueint & 0xFF);
+                if (node.node_type == NODE_TYPE_MECHANICAL) {
+                    node.find_me_output_index = 0xFF;
+                } else if (item && cJSON_IsNumber(item)) {
+                    node.find_me_output_index = (uint8_t)(item->valueint & 0xFF);
+                }
                 item = cJSON_GetObjectItem(node_json, "can_link_indicator_gpio");
                 if (item && cJSON_IsNumber(item)) node.can_link_indicator_gpio = (uint8_t)(item->valueint & 0xFF);
                 item = cJSON_GetObjectItem(node_json, "night_light_on");
                 if (item && cJSON_IsBool(item)) node.night_light_on = cJSON_IsTrue(item);
                 item = cJSON_GetObjectItem(node_json, "night_light_brightness");
                 if (item && cJSON_IsNumber(item)) node.night_light_brightness = (uint8_t)(item->valueint & 0xFF);
+                item = cJSON_GetObjectItem(node_json, "ws2812_click_effect");
+                if (item && cJSON_IsNumber(item)) node.ws2812_click_effect = (item->valueint != 0) ? 1 : 0;
+                load_ws2812_effects_from_json(node, node_json);
+                item = cJSON_GetObjectItem(node_json, "fw_version");
+                if (item && cJSON_IsNumber(item)) node.fw_version = (uint16_t)item->valueint;
+                item = cJSON_GetObjectItem(node_json, "ota_capable");
+                if (item && cJSON_IsNumber(item)) node.ota_capable = (uint8_t)(item->valueint & 1);
+                item = cJSON_GetObjectItem(node_json, "last_ota_result");
+                if (item && cJSON_IsString(item) && item->valuestring)
+                    strncpy(node.last_ota_result, item->valuestring, sizeof(node.last_ota_result) - 1);
                 merged[node.node_id] = node;
             }
         }
@@ -1223,13 +1343,22 @@ static cJSON* get_nodes_json(void) {
         const char* type_str = (node.node_type == NODE_TYPE_LCD) ? "LCD" : 
                                (node.node_type == NODE_TYPE_MECHANICAL) ? "mechanical" : "unknown";
         cJSON_AddStringToObject(node_json, "type_string", type_str);
-        if (node.find_me_output_index != 0xFF)
+        if (node.node_type != NODE_TYPE_MECHANICAL && node.find_me_output_index != 0xFF)
             cJSON_AddNumberToObject(node_json, "find_me_output_index", node.find_me_output_index);
         if (node.can_link_indicator_gpio != 0xFF)
             cJSON_AddNumberToObject(node_json, "can_link_indicator_gpio", node.can_link_indicator_gpio);
         if (node.node_type == NODE_TYPE_MECHANICAL) {
             cJSON_AddBoolToObject(node_json, "night_light_on", node.night_light_on);
             cJSON_AddNumberToObject(node_json, "night_light_brightness", node.night_light_brightness);
+            cJSON_AddNumberToObject(node_json, "ws2812_click_effect", node.ws2812_click_effect);
+            add_ws2812_effects_json(node_json, node);
+            cJSON_AddNumberToObject(node_json, "fw_version", node.fw_version);
+            cJSON_AddNumberToObject(node_json, "ota_capable", node.ota_capable);
+            if (node.last_ota_result[0] != '\0')
+                cJSON_AddStringToObject(node_json, "last_ota_result", node.last_ota_result);
+            char fw_str[16];
+            format_fw_version(node.fw_version, fw_str, sizeof(fw_str));
+            cJSON_AddStringToObject(node_json, "fw_version_string", fw_str);
         }
 
         int n_in = (node.input_count < MAX_INPUTS_PER_NODE) ? node.input_count : MAX_INPUTS_PER_NODE;
@@ -1250,7 +1379,7 @@ static cJSON* get_nodes_json(void) {
             }
             cJSON_AddItemToObject(node_json, "input_config", input_config);
         }
-
+        
         cJSON_AddItemToArray(root, node_json);
     }
     
@@ -1414,16 +1543,16 @@ extern "C" void app_main(void) {
     esp_task_wdt_deinit();
 
     esp_task_wdt_config_t twdt_config = {
-        .timeout_ms = 10000,                // 10-second timeout
-        .idle_core_mask = (1 << 0) | (1 << 1), // Watch idle tasks on both Core 0 and Core 1
-        .trigger_panic = true           // Trigger a panic (reboot) on timeout
+        .timeout_ms = 30000,
+        .idle_core_mask = 0,
+        .trigger_panic = true
     };
     ESP_ERROR_CHECK(esp_task_wdt_init(&twdt_config));
 
     //xTaskCreate(main_task, "can_gateway", 4096, NULL, 15, NULL); // High priority
     xTaskCreatePinnedToCore(main_task, "can_gateway", 4096, NULL, 15, NULL, 1);
-    xTaskCreate(can_processing_task, "can_logic", 4096, NULL, 5, NULL);
-    xTaskCreate(animation_task, "animation_task", 4096, NULL, 5, NULL);
+    xTaskCreatePinnedToCore(can_processing_task, "can_logic", 4096, NULL, 5, NULL, 0);
+    xTaskCreatePinnedToCore(animation_task, "animation_task", 4096, NULL, 5, NULL, 0);
 
     // Background RTC auto-sync task: performs a one-time sync after NTP has set
     // system time, then re-syncs periodically every RTC_AUTO_SYNC_INTERVAL_SEC.
@@ -1604,9 +1733,31 @@ static void send_timezone_to_node(uint8_t node_id, const char* tz_str) {
     }
 }
 
+static void format_fw_version(uint16_t ver, char* out, size_t out_len) {
+    if (!out || out_len == 0) return;
+    snprintf(out, out_len, "%u.%u", (unsigned)(ver >> 8), (unsigned)(ver & 0xFF));
+}
+
+static const char* mcp2515_err_str(MCP2515::ERROR err) {
+    switch (err) {
+        case MCP2515::ERROR_OK: return "OK";
+        case MCP2515::ERROR_FAIL: return "FAIL";
+        case MCP2515::ERROR_ALLTXBUSY: return "ALLTXBUSY";
+        case MCP2515::ERROR_FAILINIT: return "FAILINIT";
+        case MCP2515::ERROR_FAILTX: return "FAILTX";
+        case MCP2515::ERROR_NOMSG: return "NOMSG";
+        default: return "?";
+    }
+}
+
 static void send_node_config(uint8_t target_node_id, uint8_t cmd, const uint8_t* data, size_t len) {
     if (!mcp2515_ptr) {
         ESP_LOGW(TAG, "send_node_config: CAN not available");
+        return;
+    }
+    if (can_tunnel_is_active()) {
+        ESP_LOGD(TAG, "send_node_config: deferred during CAN tunnel (target=%u cmd=0x%02X)",
+                 (unsigned)target_node_id, (unsigned)cmd);
         return;
     }
     size_t payload_len = (len > 7) ? 7 : len;
@@ -1658,12 +1809,16 @@ static void send_node_config(uint8_t target_node_id, uint8_t cmd, const uint8_t*
             if (cmd == CMD_SET_FIND_ME_OUTPUT && len >= 1 && data) {
                 if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
                     auto it = g_nodes.find(target_node_id);
-                    if (it != g_nodes.end()) {
+                    if (it != g_nodes.end() && it->second.node_type != NODE_TYPE_MECHANICAL) {
                         it->second.find_me_output_index = data[0];
                         ESP_LOGI(TAG, "find_me_output_index=%u for node %u", (unsigned)data[0], (unsigned)target_node_id);
+                        xSemaphoreGive(g_nodes_mutex);
+                        save_nodes_to_config();
+                    } else {
+                        if (it != g_nodes.end())
+                            ESP_LOGI(TAG, "find_me_output_index ignored for mechanical node %u (WS2812 strip)", (unsigned)target_node_id);
+                        xSemaphoreGive(g_nodes_mutex);
                     }
-                    xSemaphoreGive(g_nodes_mutex);
-                    save_nodes_to_config();
                 }
             }
             if (cmd == CMD_SET_CAN_LINK_INDICATOR && len >= 1 && data) {
@@ -1687,6 +1842,41 @@ static void send_node_config(uint8_t target_node_id, uint8_t cmd, const uint8_t*
                         it->second.night_light_on = (enabled != 0);
                         it->second.night_light_brightness = brightness;
                         ESP_LOGI(TAG, "night_light %s brightness=%u for node %u", enabled ? "on" : "off", (unsigned)brightness, (unsigned)target_node_id);
+                    }
+                    xSemaphoreGive(g_nodes_mutex);
+                    save_nodes_to_config();
+                }
+            }
+            if (cmd == CMD_SET_WS2812_CLICK_EFFECT && len >= 1 && data) {
+                uint8_t effect = data[0] ? 1 : 0;
+                if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
+                    auto it = g_nodes.find(target_node_id);
+                    if (it != g_nodes.end()) {
+                        it->second.ws2812_click_effect = effect;
+                        ESP_LOGI(TAG, "ws2812_click_effect=%u for node %u", (unsigned)effect, (unsigned)target_node_id);
+                    }
+                    xSemaphoreGive(g_nodes_mutex);
+                    save_nodes_to_config();
+                }
+            }
+            if (cmd == CMD_SET_WS2812_EFFECT_PARAMS && len >= 6 && data && data[0] <= 2) {
+                uint8_t effect_id = data[0];
+                uint8_t r = data[1];
+                uint8_t g = data[2];
+                uint8_t b = data[3];
+                uint16_t timing_ms = (uint16_t)data[4] | ((uint16_t)data[5] << 8);
+                if (timing_ms < 10) timing_ms = 10;
+                if (timing_ms > 2000) timing_ms = 2000;
+                Ws2812EffectParams params = {r, g, b, timing_ms};
+                if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
+                    auto it = g_nodes.find(target_node_id);
+                    if (it != g_nodes.end()) {
+                        if (effect_id == 0) it->second.ws2812_strobe = params;
+                        else if (effect_id == 1) it->second.ws2812_chase = params;
+                        else it->second.ws2812_find_me = params;
+                        ESP_LOGI(TAG, "ws2812 effect params id=%u rgb=%u,%u,%u timing=%u for node %u",
+                                 (unsigned)effect_id, (unsigned)r, (unsigned)g, (unsigned)b,
+                                 (unsigned)timing_ms, (unsigned)target_node_id);
                     }
                     xSemaphoreGive(g_nodes_mutex);
                     save_nodes_to_config();
@@ -1721,26 +1911,35 @@ void can_processing_task(void *pvParameter) {
     while (1) {
         ESP_ERROR_CHECK(esp_task_wdt_reset());
 
-        // Process multiple messages in one go if available
-        int messages_processed = 0;
+        if (can_tunnel_is_active()) {
+            if (xQueueReceive(can_message_queue, &frame, pdMS_TO_TICKS(50))) {
+                /* process below */
+            } else {
+                continue;
+            }
+        } else if (xQueueReceive(can_message_queue, &frame, pdMS_TO_TICKS(5000))) {
+            /* process below */
+        } else {
+            continue;
+        }
 
-        // 1. Wait here until one message arrives from the gateway task.
-        if (xQueueReceive(can_message_queue, &frame, pdMS_TO_TICKS(5000))) {
-
+        {
             // Protocol guard: this project only supports standard 11-bit data frames.
             if (!isStandardDataFrame(frame.can_id)) {
                 ESP_LOGW(TAG, "Ignoring non-standard CAN frame (can_id=0x%lX)", frame.can_id);
                 continue;
             }
 
+            const uint16_t raw_sid = getStandardId(frame.can_id);
+            CanMessageType msgType = resolveMessageType(raw_sid, frame.data, frame.can_dlc);
+            const uint16_t sid = canonicalSid(raw_sid, msgType);
+            uint8_t msgTypeValue = (uint8_t)msgType;
+
             HSG_CanFrame api_frame;
-            api_frame.id = frame.can_id;
+            api_frame.id = sid;
             api_frame.dlc = frame.can_dlc;
             memcpy(api_frame.data, frame.data, frame.can_dlc);
             HSG::API::add_to_can_history(api_frame);
-            const uint16_t sid = getStandardId(frame.can_id);
-            CanMessageType msgType = getMessageType(sid);
-            uint8_t msgTypeValue = (uint8_t)msgType;
 
             if (msgType == LIGHTING_COMMAND) {
                 if (frame.can_dlc >= 2) {
@@ -1806,14 +2005,14 @@ void can_processing_task(void *pvParameter) {
             } else if (msgType == HEARTBEAT || msgTypeValue == 0x08) {
                 uint8_t nodeId = getNodeId(sid);
                 int64_t current_time_us = esp_timer_get_time();
-                ESP_LOGI(TAG, "HEARTBEAT received: nodeId=%u, DLC=%u, data[0]=0x%02X, data[1]=0x%02X, msgTypeValue=0x%02X", 
+                ESP_LOGD(TAG, "HEARTBEAT received: nodeId=%u, DLC=%u, data[0]=0x%02X, data[1]=0x%02X, msgTypeValue=0x%02X", 
                          (unsigned)nodeId, (unsigned)frame.can_dlc, frame.data[0], frame.data[1], msgTypeValue);
                 
                 if (frame.can_dlc >= 2) {
                     uint8_t node_type = frame.data[0];
                     uint8_t input_count = frame.data[1];
                     const char* type_str = (node_type == NODE_TYPE_LCD) ? "LCD" : (node_type == NODE_TYPE_MECHANICAL) ? "mechanical" : "unknown";
-                    ESP_LOGI(TAG, "HEARTBEAT processing: nodeId=%u, type=%s (%u), input_count=%u", 
+                    ESP_LOGD(TAG, "HEARTBEAT processing: nodeId=%u, type=%s (%u), input_count=%u", 
                              (unsigned)nodeId, type_str, (unsigned)node_type, (unsigned)input_count);
                     
                     // Update node registry
@@ -1833,6 +2032,12 @@ void can_processing_task(void *pvParameter) {
                              current_time_us < 120000000))  // 120 s: always push time for first 2 min after hub boot
                             lcd_just_came_online = true;
                         node.is_configured = (nodeId != NODE_ID_UNCONFIGURED);
+                        if (node_type == NODE_TYPE_MECHANICAL)
+                            node.find_me_output_index = 0xFF;
+                        if (frame.can_dlc >= 5) {
+                            node.fw_version = (uint16_t)frame.data[2] | ((uint16_t)frame.data[3] << 8);
+                            node.ota_capable = frame.data[4] ? 1 : 0;
+                        }
                         
                         if (nodeId == NODE_ID_UNCONFIGURED) {
                             if (is_new) {
@@ -1915,6 +2120,23 @@ void can_processing_task(void *pvParameter) {
                     }
                     ESP_LOGD(TAG, "Heartbeat from node 0x%02X", nodeId);
                 }
+            } else if (isCanOtaNodeMessage(msgType)) {
+                uint8_t nodeId = getNodeId(sid);
+                if (frame.can_dlc >= 3 && g_nodes_mutex
+                    && xSemaphoreTake(g_nodes_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+                    auto it = g_nodes.find(nodeId);
+                    if (it != g_nodes.end()) {
+                        const uint8_t opcode = frame.data[2];
+                        if (opcode == OTA_FLASH_COMPLETE)
+                            strncpy(it->second.last_ota_result, "success", sizeof(it->second.last_ota_result) - 1);
+                        else if (opcode == OTA_FLASH_ERROR)
+                            strncpy(it->second.last_ota_result, "failed", sizeof(it->second.last_ota_result) - 1);
+                        it->second.last_ota_result[sizeof(it->second.last_ota_result) - 1] = '\0';
+                        if (opcode == OTA_FLASH_COMPLETE || opcode == OTA_FLASH_ERROR)
+                            defer_save_nodes_to_config();
+                    }
+                    xSemaphoreGive(g_nodes_mutex);
+                }
             } else {
                 ESP_LOGW(TAG, "Unknown message type: 0x%02X (CAN ID: 0x%03X, SID: 0x%03X)", 
                          (unsigned)msgType, (unsigned)frame.can_id, sid);
@@ -1970,6 +2192,10 @@ void main_task(void *pvParameter)
     
     if (!can_available) {
         ESP_LOGW(TAG, "MCP2515 not available, running without CAN support.");
+    } else {
+        can_tunnel_set_hw(mcp2515_ptr, g_can_send_mutex);
+        can_tunnel_set_hub_rx_queue(can_message_queue);
+        can_tunnel_register_http(HSG::API::http_server());
     }
 
     // GPIO interrupt setup (keep your existing code)
@@ -1982,7 +2208,6 @@ void main_task(void *pvParameter)
     gpio_config(&io_conf);
 
     gpio_evt_queue = xQueueCreate(30, sizeof(uint32_t));
-    
     ESP_ERROR_CHECK(gpio_isr_handler_add((gpio_num_t)CAN_INT_GPIO, gpio_isr_handler, (void*)CAN_INT_GPIO));
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
     // Let SPI/CAN settle before first transaction to avoid spi_master assert on early use
@@ -1993,35 +2218,46 @@ void main_task(void *pvParameter)
         ESP_ERROR_CHECK(esp_task_wdt_reset());
 
         if (can_available) {
-            // Wait for an interrupt signal from the ISR
+            if (can_tunnel_is_active()) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+            } else {
+            const TickType_t irq_wait = pdMS_TO_TICKS(1000);
             uint32_t io_num;
-            if (xQueueReceive(gpio_evt_queue, &io_num, pdMS_TO_TICKS(1000))) {
-                // Serialize all MCP2515 SPI access (read + send) to avoid spi_master assert (ret_trans == trans_desc)
-                if (g_can_send_mutex && xSemaphoreTake(g_can_send_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            if (xQueueReceive(gpio_evt_queue, &io_num, irq_wait) == pdTRUE) {
+                if (g_can_send_mutex && xSemaphoreTake(g_can_send_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
                     int messages_processed = 0;
                     can_frame received_frame;
                     do {
                         if (mcp2515_ptr->readMessage(&received_frame) == MCP2515::ERROR_OK) {
                             messages_processed++;
-                            if (xQueueSend(can_message_queue, &received_frame, 0) != pdPASS) {
-                                ESP_LOGW(TAG, "CAN processing queue full! Dropped message ID: 0x%lX", received_frame.can_id);
+                            if (isStandardDataFrame(received_frame.can_id)) {
+                                if (xQueueSend(can_message_queue, &received_frame, 0) != pdPASS) {
+                                    ESP_LOGW(TAG, "CAN processing queue full! Dropped message ID: 0x%lX", received_frame.can_id);
+                                }
                             }
                         } else {
-                            break; // No more messages
-                        }
-                        if (messages_processed >= 10) {
-                            ESP_LOGW(TAG, "Reached safety limit of 10 messages per interrupt");
                             break;
                         }
+                        if (messages_processed >= 32)
+                            break;
                     } while (true);
                     if (mcp2515_ptr->checkError()) {
+                        static int64_t s_last_can_err_log_us = 0;
+                        static uint8_t s_last_can_err_flags = 0;
                         uint8_t err_flags = mcp2515_ptr->getErrorFlags();
-                        ESP_LOGW(TAG, "CAN error detected (flags: 0x%02X), clearing flags.", err_flags);
                         mcp2515_ptr->clearRXnOVRFlags();
                         mcp2515_ptr->clearInterrupts();
+                        int64_t now_us = esp_timer_get_time();
+                        if (err_flags != s_last_can_err_flags
+                            || (now_us - s_last_can_err_log_us) > 5000000LL) {
+                            ESP_LOGW(TAG, "CAN error (flags: 0x%02X), cleared", err_flags);
+                            s_last_can_err_flags = err_flags;
+                            s_last_can_err_log_us = now_us;
+                        }
                     }
                     xSemaphoreGive(g_can_send_mutex);
                 }
+            }
             }
         }else {
             // If CAN is not available, just delay to avoid a tight loop
@@ -2071,23 +2307,25 @@ void animation_task(void *pvParameter)
 
             // Defer all CAN (SPI) sends for a few seconds after boot to avoid spi_master assert on first transactions.
             const uint32_t CAN_SEND_DEFER_MS = 5000;
-            if (now < CAN_SEND_DEFER_MS)
-                /* skip CAN sends */ ;
-            else if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+            if (now >= CAN_SEND_DEFER_MS && g_nodes_mutex
+                && xSemaphoreTake(g_nodes_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
                 std::vector<uint8_t> lcd_nodes;
                 std::vector<uint8_t> mechanical_nodes;
                 for (const auto& pair : g_nodes) {
                     if (pair.second.node_type == NODE_TYPE_LCD && pair.second.node_id != NODE_ID_UNCONFIGURED)
                         lcd_nodes.push_back(pair.second.node_id);
-                    if (pair.second.node_type == NODE_TYPE_MECHANICAL && pair.second.node_id != NODE_ID_UNCONFIGURED)
+                    if (pair.second.node_type == NODE_TYPE_MECHANICAL)
                         mechanical_nodes.push_back(pair.second.node_id);
                 }
                 xSemaphoreGive(g_nodes_mutex);
-                for (uint8_t nid : lcd_nodes)
-                    maybe_send_feedback_to_node(nid);
+
+                if (!can_tunnel_is_active()) {
+                    for (uint8_t nid : lcd_nodes)
+                        maybe_send_feedback_to_node(nid);
+                }
 
                 // Send SENSOR_DATA (0x2) link keepalive to mechanical nodes every 7 s so their CAN link LED matches hub online state.
-                // Delay between each send to avoid back-to-back SPI transactions (spi_master assert ret_trans == trans_desc).
+                // Keep this running during CAN tunnel so nodes stay visible on the bus.
                 static uint32_t last_mechanical_link_ms = 0;
                 const uint32_t MECHANICAL_LINK_INTERVAL_MS = 7000;
                 if (now - last_mechanical_link_ms >= MECHANICAL_LINK_INTERVAL_MS && !mechanical_nodes.empty()) {
@@ -2098,6 +2336,7 @@ void animation_task(void *pvParameter)
                     last_mechanical_link_ms = now;
                 }
 
+                if (!can_tunnel_is_active()) {
                 // Send date/time to LCD nodes: every 2s for first 60s (so node gets time soon after boot), then every hour
                 static uint32_t datetime_send_counter = 0;
                 const uint32_t loops_per_second = 1000 / 16;  // ~62
@@ -2125,6 +2364,7 @@ void animation_task(void *pvParameter)
                         send_timezone_to_node(nid, tz.c_str());
                         send_node_config(nid, CMD_SET_DATETIME, datetime_payload, sizeof(datetime_payload));
                     }
+                }
                 }
             }
         }

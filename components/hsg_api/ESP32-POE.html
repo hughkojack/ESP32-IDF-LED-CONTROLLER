@@ -315,16 +315,29 @@
                                 <th class="px-4 py-3">Type</th>
                                 <th class="px-4 py-3">Inputs</th>
                                 <th class="px-4 py-3">Status</th>
+                                <th class="px-4 py-3">Firmware</th>
                                 <th class="px-4 py-3">Last Seen</th>
-                                <th class="px-4 py-3">Actions</th>
+                                <th class="px-4 py-3 whitespace-nowrap min-w-[24rem]">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="nodesTableBody">
                         </tbody>
                     </table>
                 </div>
-                <div id="nodeConfigModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div class="bg-gray-800 p-6 rounded-lg shadow-lg max-w-md w-full mx-4">
+                <div id="canTunnelInfo" class="mt-4 p-4 bg-gray-700 rounded-lg text-sm text-gray-300">
+                    <p class="font-semibold text-white mb-2">Node firmware updates (laptop)</p>
+                    <p class="mb-2">Run <code class="text-amber-300">can_ota_bench.py --tunnel http://&lt;hub-ip&gt;</code> from your laptop. The script opens and closes the CAN tunnel automatically.</p>
+                    <p class="text-xs text-gray-500 mb-3">Avoid refreshing this page during an active transfer.</p>
+                    <div class="flex flex-wrap gap-3 items-center">
+                        <span id="canTunnelLaptopBadge" class="inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-gray-600 text-gray-400">
+                            <span id="canTunnelLaptopDot" class="w-2 h-2 rounded-full bg-gray-500"></span>
+                            <span id="canTunnelLaptopLabel">Checking…</span>
+                        </span>
+                        <span id="canTunnelStatus" class="text-xs text-gray-500"></span>
+                    </div>
+                </div>
+                <div id="nodeConfigModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div class="bg-gray-800 p-6 rounded-lg shadow-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
                         <h3 class="text-lg font-semibold mb-4 text-white">Configure Node</h3>
                         <div class="space-y-4">
                             <div class="flex gap-4">
@@ -356,12 +369,14 @@
                                     <button id="setInputCountBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-md transition duration-300">Set input count</button>
                                 </div>
                             </div>
-                            <div class="border-t border-gray-600 pt-4 mt-4">
-                                <h4 class="text-sm font-medium text-gray-300 mb-2">Find Me output (I/O index)</h4>
-                                <p class="text-xs text-gray-400 mb-2">ESP32-S3 chip I/O (GPIO) index 0–48 to blink for Find Me.</p>
-                                <div class="flex items-center gap-2">
-                                    <input type="number" id="nodeFindMeOutputInput" min="0" max="48" value="0" class="bg-gray-600 text-white rounded px-3 py-2 border border-gray-500 w-20">
-                                    <span class="text-gray-400 mx-2">|</span>
+                            <div id="nodeFindMeSection" class="border-t border-gray-600 pt-4 mt-4">
+                                <h4 class="text-sm font-medium text-gray-300 mb-2">Find Me</h4>
+                                <p id="nodeFindMeHelpText" class="text-xs text-gray-400 mb-2">ESP32-S3 chip I/O (GPIO) index 0–48 to blink for Find Me.</p>
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <span id="nodeFindMeGpioWrap" class="flex items-center gap-2">
+                                        <input type="number" id="nodeFindMeOutputInput" min="0" max="48" value="0" class="bg-gray-600 text-white rounded px-3 py-2 border border-gray-500 w-20">
+                                        <span class="text-gray-400">|</span>
+                                    </span>
                                     <label class="text-sm text-gray-400">Blink for</label>
                                     <input type="number" id="nodeFindMeDurationInput" min="1" max="30" value="5" class="bg-gray-600 text-white rounded px-3 py-2 border border-gray-500 w-16" title="Duration in minutes">
                                     <span class="text-sm text-gray-400">min</span>
@@ -376,22 +391,6 @@
                                     <button id="setCanLinkIndicatorBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-md transition duration-300">Set</button>
                                 </div>
                             </div>
-                            <div id="nodeNightLightWrap" class="border-t border-gray-600 pt-4 mt-4 hidden">
-                                <h4 class="text-sm font-medium text-gray-300 mb-2">WS2812 night light (mechanical)</h4>
-                                <p class="text-xs text-gray-400 mb-2">Warm dim strip on D6 (GPIO 21). Short presses still flash white briefly.</p>
-                                <div class="flex flex-col gap-3">
-                                    <label class="flex items-center gap-2 text-sm text-gray-300">
-                                        <input type="checkbox" id="nodeNightLightEnabled" class="rounded">
-                                        Night light on
-                                    </label>
-                                    <div class="flex items-center gap-3">
-                                        <label for="nodeNightLightBrightness" class="text-sm text-gray-400 whitespace-nowrap">Brightness</label>
-                                        <input type="range" id="nodeNightLightBrightness" min="0" max="100" value="30" class="flex-1">
-                                        <span id="nodeNightLightBrightnessVal" class="text-sm text-gray-300 w-10 text-right">30</span>
-                                    </div>
-                                    <button id="setNightLightBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-md transition duration-300 w-full">Apply night light</button>
-                                </div>
-                            </div>
                             <div class="border-t border-gray-600 pt-4 mt-4">
                                 <h4 class="text-sm font-medium text-gray-300 mb-2">Switch type per input</h4>
                                 <p class="text-xs text-gray-400 mb-2">Set each input to momentary (button) or toggle (rocker/maintained).</p>
@@ -399,6 +398,74 @@
                                 <button id="applyInputTypesBtn" class="mt-3 w-full bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-md transition duration-300 hidden">Apply input types</button>
                             </div>
                         </div>
+                    </div>
+                </div>
+                <div id="nodeWs2812Modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div class="bg-gray-800 p-6 rounded-lg shadow-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
+                        <h3 class="text-lg font-semibold mb-4 text-white">Strip lighting — <span id="ws2812NodeIdLabel"></span></h3>
+                        <div class="flex flex-col gap-3">
+                            <label class="text-sm text-gray-300" for="nodeWs2812ClickEffect">Click / double-click effect</label>
+                            <select id="nodeWs2812ClickEffect" class="bg-gray-600 text-white rounded px-3 py-2 text-sm border border-gray-500 w-full">
+                                <option value="0">Strobe (dim flash)</option>
+                                <option value="1">Chase (1→12→1)</option>
+                            </select>
+                            <button id="saveWs2812EffectBtn" type="button" class="bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold py-2 px-4 rounded-md transition duration-300 w-full">Save click effect</button>
+
+                            <div class="border-t border-gray-600 pt-3 mt-1 space-y-3">
+                                <p class="text-xs text-gray-400">RGB and speed per effect (stored on node; applied on next click or find-me).</p>
+                                <div class="border border-gray-600 rounded p-3 space-y-2">
+                                    <p class="text-sm font-medium text-white">Strobe</p>
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <label class="text-xs text-gray-400" for="ws2812StrobeColor">Color</label>
+                                        <input type="color" id="ws2812StrobeColor" value="#dcb450" class="h-8 w-12 rounded border border-gray-500 bg-gray-600">
+                                        <label class="text-xs text-gray-400" for="ws2812StrobeTiming">Half-period (ms)</label>
+                                        <input type="number" id="ws2812StrobeTiming" min="10" max="2000" value="45" class="bg-gray-600 text-white rounded px-2 py-1 text-sm border border-gray-500 w-20">
+                                    </div>
+                                    <button id="saveWs2812StrobeBtn" type="button" class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold py-1.5 px-3 rounded-md w-full">Save strobe settings</button>
+                                </div>
+                                <div class="border border-gray-600 rounded p-3 space-y-2">
+                                    <p class="text-sm font-medium text-white">Chase</p>
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <label class="text-xs text-gray-400" for="ws2812ChaseColor">Color</label>
+                                        <input type="color" id="ws2812ChaseColor" value="#503c18" class="h-8 w-12 rounded border border-gray-500 bg-gray-600">
+                                        <label class="text-xs text-gray-400" for="ws2812ChaseTiming">Step (ms)</label>
+                                        <input type="number" id="ws2812ChaseTiming" min="10" max="2000" value="50" class="bg-gray-600 text-white rounded px-2 py-1 text-sm border border-gray-500 w-20">
+                                    </div>
+                                    <button id="saveWs2812ChaseBtn" type="button" class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold py-1.5 px-3 rounded-md w-full">Save chase settings</button>
+                                </div>
+                                <div class="border border-gray-600 rounded p-3 space-y-2">
+                                    <p class="text-sm font-medium text-white">Find Me</p>
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <label class="text-xs text-gray-400" for="ws2812FindMeColor">Color</label>
+                                        <input type="color" id="ws2812FindMeColor" value="#b47814" class="h-8 w-12 rounded border border-gray-500 bg-gray-600">
+                                        <label class="text-xs text-gray-400" for="ws2812FindMeTiming">Blink toggle (ms)</label>
+                                        <input type="number" id="ws2812FindMeTiming" min="10" max="2000" value="150" class="bg-gray-600 text-white rounded px-2 py-1 text-sm border border-gray-500 w-20">
+                                    </div>
+                                    <button id="saveWs2812FindMeParamsBtn" type="button" class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold py-1.5 px-3 rounded-md w-full">Save find-me settings</button>
+                                </div>
+                            </div>
+
+                            <label class="flex items-center gap-2 text-sm text-gray-300">
+                                <input type="checkbox" id="nodeNightLightEnabled" class="rounded">
+                                Night light on
+                            </label>
+                            <div class="flex items-center gap-3">
+                                <label for="nodeNightLightBrightness" class="text-sm text-gray-400 whitespace-nowrap">Brightness</label>
+                                <input type="range" id="nodeNightLightBrightness" min="0" max="100" value="30" class="flex-1">
+                                <span id="nodeNightLightBrightnessVal" class="text-sm text-gray-300 w-10 text-right">30</span>
+                            </div>
+                            <button id="setNightLightBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-md transition duration-300 w-full">Apply night light</button>
+                            <div class="border-t border-gray-600 pt-3 mt-1">
+                                <p class="text-xs text-gray-400 mb-2">Blink all 12 LEDs amber on D6 to locate this node.</p>
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <label class="text-sm text-gray-400">Blink for</label>
+                                    <input type="number" id="ws2812FindMeDurationInput" min="1" max="30" value="5" class="bg-gray-600 text-white rounded px-3 py-2 border border-gray-500 w-16" title="Duration in minutes">
+                                    <span class="text-sm text-gray-400">min</span>
+                                    <button id="findMeWs2812Btn" type="button" class="bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold py-2 px-4 rounded-md transition duration-300">Find Me</button>
+                                </div>
+                            </div>
+                        </div>
+                        <button id="closeNodeWs2812Btn" type="button" class="mt-4 w-full bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md transition duration-300">Close</button>
                     </div>
                 </div>
                 <div id="nodeTimingModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -669,7 +736,6 @@
             const bindFade = document.getElementById('bindFade');
             const refreshNodesBtn = document.getElementById('refreshNodesBtn');
             const nodesTableBody = document.getElementById('nodesTableBody');
-            const nodeConfigModal = document.getElementById('nodeConfigModal');
             const newNodeId = document.getElementById('newNodeId');
             const configNodeIdDisplay = document.getElementById('configNodeIdDisplay');
             const confirmNodeConfigBtn = document.getElementById('confirmNodeConfigBtn');
@@ -684,11 +750,28 @@
             const nodeCanLinkIndicatorWrap = document.getElementById('nodeCanLinkIndicatorWrap');
             const nodeCanLinkIndicatorInput = document.getElementById('nodeCanLinkIndicatorInput');
             const setCanLinkIndicatorBtn = document.getElementById('setCanLinkIndicatorBtn');
-            const nodeNightLightWrap = document.getElementById('nodeNightLightWrap');
-            const nodeNightLightEnabled = document.getElementById('nodeNightLightEnabled');
+                        const nodeNightLightEnabled = document.getElementById('nodeNightLightEnabled');
             const nodeNightLightBrightness = document.getElementById('nodeNightLightBrightness');
             const nodeNightLightBrightnessVal = document.getElementById('nodeNightLightBrightnessVal');
             const setNightLightBtn = document.getElementById('setNightLightBtn');
+
+            const nodeWs2812Modal = document.getElementById('nodeWs2812Modal');
+            const ws2812NodeIdLabel = document.getElementById('ws2812NodeIdLabel');
+            const closeNodeWs2812Btn = document.getElementById('closeNodeWs2812Btn');
+            const ws2812StrobeColor = document.getElementById('ws2812StrobeColor');
+            const ws2812StrobeTiming = document.getElementById('ws2812StrobeTiming');
+            const saveWs2812StrobeBtn = document.getElementById('saveWs2812StrobeBtn');
+            const ws2812ChaseColor = document.getElementById('ws2812ChaseColor');
+            const ws2812ChaseTiming = document.getElementById('ws2812ChaseTiming');
+            const saveWs2812ChaseBtn = document.getElementById('saveWs2812ChaseBtn');
+            const ws2812FindMeColor = document.getElementById('ws2812FindMeColor');
+            const ws2812FindMeTiming = document.getElementById('ws2812FindMeTiming');
+            const saveWs2812FindMeParamsBtn = document.getElementById('saveWs2812FindMeParamsBtn');
+            const saveWs2812EffectBtn = document.getElementById('saveWs2812EffectBtn');
+            const findMeWs2812Btn = document.getElementById('findMeWs2812Btn');
+            const ws2812FindMeDurationInput = document.getElementById('ws2812FindMeDurationInput');
+            let currentWs2812NodeId = null;
+            let ws2812UiLoading = false;
 
             let currentBindings = [];
             let currentConfiguringNodeId = null;
@@ -784,6 +867,14 @@
             if (nodeTimingModal) nodeTimingModal.addEventListener('click', (e) => { if (e.target === nodeTimingModal) nodeTimingModal.classList.add('hidden'); });
             if (sendTimingToAllBtn) sendTimingToAllBtn.addEventListener('click', sendTimingToAllNodes);
 
+            if (closeNodeWs2812Btn) closeNodeWs2812Btn.addEventListener('click', closeNodeWs2812Modal);
+            if (nodeWs2812Modal) nodeWs2812Modal.addEventListener('click', (e) => { if (e.target === nodeWs2812Modal) closeNodeWs2812Modal(); });
+            if (saveWs2812StrobeBtn) saveWs2812StrobeBtn.addEventListener('click', () => sendWs2812EffectParamsFromModal('strobe', ws2812StrobeColor, ws2812StrobeTiming, saveWs2812StrobeBtn));
+            if (saveWs2812ChaseBtn) saveWs2812ChaseBtn.addEventListener('click', () => sendWs2812EffectParamsFromModal('chase', ws2812ChaseColor, ws2812ChaseTiming, saveWs2812ChaseBtn));
+            if (saveWs2812FindMeParamsBtn) saveWs2812FindMeParamsBtn.addEventListener('click', () => sendWs2812EffectParamsFromModal('find_me', ws2812FindMeColor, ws2812FindMeTiming, saveWs2812FindMeParamsBtn));
+            if (saveWs2812EffectBtn) saveWs2812EffectBtn.addEventListener('click', sendClickEffectFromModal);
+            if (findMeWs2812Btn) findMeWs2812Btn.addEventListener('click', sendFindMeFromWs2812Modal);
+
             // --- Functions ---
 
             function handleTabClick(clickedTab) {
@@ -793,7 +884,12 @@
                 mainContent.querySelectorAll('.config-section').forEach(section => {
                     section.id === targetId ? section.classList.remove('hidden') : section.classList.add('hidden');
                 });
-                if (targetId === 'nodesSection') fetchNodes();
+                if (targetId === 'nodesSection') {
+                    fetchNodes();
+                    startCanTunnelStatusPoll();
+                } else {
+                    stopCanTunnelStatusPoll();
+                }
                 if (targetId === 'commandSection') populateCommandTargetSelect();
             }
 
@@ -1238,9 +1334,71 @@
                 } catch (error) {
                     console.error('Error fetching nodes:', error);
                     if (nodesTableBody) {
-                        nodesTableBody.innerHTML = '<tr><td colspan="6" class="px-4 py-3 text-center text-red-400">Error loading nodes</td></tr>';
+                        nodesTableBody.innerHTML = '<tr><td colspan="7" class="px-4 py-3 text-center text-red-400">Error loading nodes</td></tr>';
                     }
                 }
+            }
+
+            const canTunnelLaptopBadge = document.getElementById('canTunnelLaptopBadge');
+            const canTunnelLaptopDot = document.getElementById('canTunnelLaptopDot');
+            const canTunnelLaptopLabel = document.getElementById('canTunnelLaptopLabel');
+            const canTunnelStatus = document.getElementById('canTunnelStatus');
+            let canTunnelPollTimer = null;
+
+            function setCanTunnelUi(connected, active, port) {
+                if (!canTunnelLaptopLabel || !canTunnelLaptopDot || !canTunnelLaptopBadge) return;
+                if (connected) {
+                    canTunnelLaptopLabel.textContent = 'Laptop connected';
+                    canTunnelLaptopDot.className = 'w-2 h-2 rounded-full bg-green-400 animate-pulse';
+                    canTunnelLaptopBadge.className = 'inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-green-900/50 text-green-300 border border-green-700';
+                    if (canTunnelStatus) canTunnelStatus.textContent = `CAN tunnel active · TCP port ${port}`;
+                } else if (active) {
+                    canTunnelLaptopLabel.textContent = 'Waiting for laptop…';
+                    canTunnelLaptopDot.className = 'w-2 h-2 rounded-full bg-amber-400 animate-pulse';
+                    canTunnelLaptopBadge.className = 'inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-amber-900/40 text-amber-300 border border-amber-700';
+                    if (canTunnelStatus) canTunnelStatus.textContent = `Tunnel open on port ${port} — start can_ota_bench.py on your laptop`;
+                } else {
+                    canTunnelLaptopLabel.textContent = 'No laptop connected';
+                    canTunnelLaptopDot.className = 'w-2 h-2 rounded-full bg-gray-500';
+                    canTunnelLaptopBadge.className = 'inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-gray-600 text-gray-400';
+                    if (canTunnelStatus) canTunnelStatus.textContent = 'Idle — OTA starts when you run can_ota_bench.py --tunnel';
+                }
+            }
+
+            async function refreshCanTunnelStatus() {
+                try {
+                    const r = await fetch('/api/can/tunnel/status');
+                    if (!r.ok) {
+                        setCanTunnelUi(false, false, 5250);
+                        if (canTunnelLaptopLabel) canTunnelLaptopLabel.textContent = 'Status unavailable';
+                        return;
+                    }
+                    const st = await r.json();
+                    const port = st.port != null ? st.port : 5250;
+                    setCanTunnelUi(!!st.client_connected, !!st.active, port);
+                } catch (e) {
+                    if (canTunnelLaptopLabel) canTunnelLaptopLabel.textContent = 'Status error';
+                    if (canTunnelStatus) canTunnelStatus.textContent = '';
+                }
+            }
+
+            function startCanTunnelStatusPoll() {
+                stopCanTunnelStatusPoll();
+                refreshCanTunnelStatus();
+                canTunnelPollTimer = setInterval(refreshCanTunnelStatus, 2000);
+            }
+
+            function stopCanTunnelStatusPoll() {
+                if (canTunnelPollTimer) {
+                    clearInterval(canTunnelPollTimer);
+                    canTunnelPollTimer = null;
+                }
+            }
+
+
+            function formatNodeFwVersion(node) {
+                if (node.fw_version) return `${(node.fw_version >> 8) & 0xFF}.${node.fw_version & 0xFF}`;
+                return node.ota_capable ? 'unknown' : '—';
             }
 
             function renderNodesTable(nodes) {
@@ -1248,7 +1406,7 @@
                 nodesTableBody.innerHTML = '';
                 
                 if (!nodes || nodes.length === 0) {
-                    nodesTableBody.innerHTML = '<tr><td colspan="6" class="px-4 py-3 text-center text-gray-400">No nodes discovered yet.<br><span class="text-xs">Nodes will appear here when they send HEARTBEAT messages on the CAN bus.</span></td></tr>';
+                    nodesTableBody.innerHTML = '<tr><td colspan="7" class="px-4 py-3 text-center text-gray-400">No nodes discovered yet.<br><span class="text-xs">Nodes will appear here when they send HEARTBEAT messages on the CAN bus.</span></td></tr>';
                     return;
                 }
 
@@ -1279,24 +1437,27 @@
                         `<span class="text-yellow-400 font-bold">${node.node_id} (Unconfigured)</span>` : 
                         node.node_id;
                     
-                    let actionsHtml = '';
-                    if (node.node_id === 127) {
-                        actionsHtml = `<button class="configure-node-btn text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded mr-2" data-node-id="${node.node_id}">Configure</button>
-                                      <button class="reboot-node-btn text-xs bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded mr-2" data-node-id="${node.node_id}">Reboot</button>
-                                      <button class="remove-node-btn text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded" data-node-id="${node.node_id}">Remove</button>`;
-                    } else {
-                        actionsHtml = `<button class="configure-node-btn text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded mr-2" data-node-id="${node.node_id}">Configure</button>
-                                      <button class="reboot-node-btn text-xs bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded mr-2" data-node-id="${node.node_id}">Reboot</button>
-                                      <button class="remove-node-btn text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded" data-node-id="${node.node_id}">Remove</button>`;
-                    }
+                    const isMechanical = (node.node_type === 2);
+                    const fwDisplay = isMechanical ? formatNodeFwVersion(node) : '—';
+                    const ws2812Btn = isMechanical
+                        ? `<button class="ws2812-node-btn shrink-0 text-xs bg-violet-600 hover:bg-violet-700 text-white px-2 py-1 rounded" data-node-id="${node.node_id}">Strip lighting</button>`
+                        : '';
+                    const actionsDisabled = false;
+                    let actionsHtml = `<div class="flex flex-nowrap items-center gap-2">
+                        <button class="configure-node-btn shrink-0 text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded" data-node-id="${node.node_id}" ${actionsDisabled ? 'disabled' : ''}>Configure</button>
+                        ${ws2812Btn}
+                        <button class="reboot-node-btn shrink-0 text-xs bg-gray-600 hover:bg-gray-700 text-white px-2 py-1 rounded" data-node-id="${node.node_id}" ${actionsDisabled ? 'disabled' : ''}>Reboot</button>
+                        <button class="remove-node-btn shrink-0 text-xs bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded" data-node-id="${node.node_id}" ${actionsDisabled ? 'disabled' : ''}>Remove</button>
+                    </div>`;
                     
                     row.innerHTML = `
                         <td class="px-4 py-3">${nodeIdDisplay}</td>
                         <td class="px-4 py-3">${node.type_string || 'unknown'}</td>
                         <td class="px-4 py-3">${node.input_count || 0}</td>
                         <td class="px-4 py-3 ${statusColor}">${statusDot} ${node.status || 'unknown'}</td>
+                        <td class="px-4 py-3 text-xs text-gray-300">${fwDisplay}</td>
                         <td class="px-4 py-3 text-xs text-gray-400">${lastSeenStr}</td>
-                        <td class="px-4 py-3">${actionsHtml}</td>
+                        <td class="px-4 py-3 whitespace-nowrap">${actionsHtml}</td>
                     `;
                     
                     nodesTableBody.appendChild(row);
@@ -1314,6 +1475,14 @@
                     btn.addEventListener('click', (e) => {
                         const nodeId = parseInt(e.target.dataset.nodeId);
                         removeNode(nodeId, e);
+                    });
+                });
+
+                document.querySelectorAll('.ws2812-node-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const el = e.currentTarget || e.target;
+                        const nodeId = parseInt(el.dataset.nodeId, 10);
+                        if (!isNaN(nodeId)) openNodeWs2812Modal(nodeId);
                     });
                 });
 
@@ -1354,6 +1523,105 @@
                 loadNodeInputTypes(nodeId);
             }
 
+            function openNodeWs2812Modal(nodeId) {
+                currentWs2812NodeId = nodeId;
+                if (ws2812NodeIdLabel) ws2812NodeIdLabel.textContent = 'Node ' + nodeId;
+                if (nodeWs2812Modal) nodeWs2812Modal.classList.remove('hidden');
+                loadNodeWs2812Settings(nodeId);
+            }
+
+            function closeNodeWs2812Modal() {
+                if (nodeWs2812Modal) nodeWs2812Modal.classList.add('hidden');
+                currentWs2812NodeId = null;
+            }
+
+            function rgbToHex(r, g, b) {
+                const h = (n) => Math.max(0, Math.min(255, n | 0)).toString(16).padStart(2, '0');
+                return '#' + h(r) + h(g) + h(b);
+            }
+
+            function hexToRgb(hex) {
+                const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '');
+                if (!m) return [0, 0, 0];
+                return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+            }
+
+            function applyWs2812EffectToUi(effectKey, colorEl, timingEl, defaults) {
+                if (!defaults) return;
+                if (colorEl) colorEl.value = rgbToHex(defaults.r, defaults.g, defaults.b);
+                if (timingEl) timingEl.value = String(defaults.timing_ms !== undefined ? defaults.timing_ms : 100);
+            }
+
+            async function loadNodeWs2812Settings(nodeId) {
+                ws2812UiLoading = true;
+                try {
+                    const res = await fetch('/api/nodes');
+                    if (!res.ok) return;
+                    const nodes = await res.json();
+                    const node = nodes.find(n => n.node_id === nodeId);
+                    if (!node) return;
+                    if (nodeNightLightEnabled)
+                        nodeNightLightEnabled.checked = !!node.night_light_on;
+                    const br = (node.night_light_brightness !== undefined) ? node.night_light_brightness : 30;
+                    if (nodeNightLightBrightness) {
+                        nodeNightLightBrightness.value = String(br);
+                        if (nodeNightLightBrightnessVal) nodeNightLightBrightnessVal.textContent = String(br);
+                    }
+                    const fxSel = document.getElementById('nodeWs2812ClickEffect');
+                    if (fxSel) {
+                        const fx = (node.ws2812_click_effect !== undefined && node.ws2812_click_effect) ? '1' : '0';
+                        fxSel.value = fx;
+                    }
+                    const effects = node.ws2812_effects || {};
+                    applyWs2812EffectToUi('strobe', ws2812StrobeColor, ws2812StrobeTiming,
+                        effects.strobe || { r: 220, g: 180, b: 80, timing_ms: 45 });
+                    applyWs2812EffectToUi('chase', ws2812ChaseColor, ws2812ChaseTiming,
+                        effects.chase || { r: 80, g: 60, b: 24, timing_ms: 50 });
+                    applyWs2812EffectToUi('find_me', ws2812FindMeColor, ws2812FindMeTiming,
+                        effects.find_me || { r: 180, g: 120, b: 20, timing_ms: 150 });
+                } catch (e) {
+                    console.error('Load WS2812 settings:', e);
+                } finally {
+                    ws2812UiLoading = false;
+                }
+            }
+
+            async function sendWs2812EffectParamsFromModal(effectName, colorEl, timingEl, btnEl) {
+                const nodeId = currentWs2812NodeId;
+                if (ws2812UiLoading || nodeId === null || !colorEl || !timingEl) return;
+                const rgb = hexToRgb(colorEl.value);
+                let timing = parseInt(timingEl.value, 10);
+                if (isNaN(timing)) timing = 100;
+                if (timing < 10) timing = 10;
+                if (timing > 2000) timing = 2000;
+                timingEl.value = String(timing);
+                const origText = btnEl ? btnEl.textContent : '';
+                if (btnEl) { btnEl.textContent = 'Sending...'; btnEl.disabled = true; }
+                try {
+                    const response = await fetch('/api/node/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            target_node_id: nodeId,
+                            command: 'set_ws2812_effect_params',
+                            effect: effectName,
+                            rgb: rgb,
+                            timing_ms: timing
+                        })
+                    });
+                    if (!response.ok) throw new Error(await response.text());
+                    if (btnEl) {
+                        btnEl.textContent = 'Saved';
+                        setTimeout(() => { btnEl.textContent = origText; btnEl.disabled = false; }, 1500);
+                    }
+                    loadNodeWs2812Settings(nodeId);
+                } catch (error) {
+                    console.error('Set WS2812 effect params:', error);
+                    alert('Error saving effect settings: ' + error.message);
+                    if (btnEl) { btnEl.textContent = origText; btnEl.disabled = false; }
+                }
+            }
+
             async function loadNodeInputTypes(nodeId) {
                 if (!nodeInputTypesContainer) return;
                 nodeInputTypesContainer.innerHTML = '';
@@ -1370,15 +1638,23 @@
                     if (nodeInputCountSelect) {
                         nodeInputCountSelect.value = inputCount > 0 ? String(inputCount) : '4';
                     }
-                    if (nodeFindMeOutputInput) {
+                    const isMechanicalNode = (node.node_type === 2);
+                    const nodeFindMeSection = document.getElementById('nodeFindMeSection');
+                    if (nodeFindMeSection) {
+                        nodeFindMeSection.classList.toggle('hidden', isMechanicalNode);
+                    }
+                    if (nodeFindMeOutputInput && !isMechanicalNode) {
                         const fmOut = node.find_me_output_index;
                         nodeFindMeOutputInput.value = (fmOut !== undefined && fmOut !== 0xFF) ? String(fmOut) : '0';
                     }
                     if (nodeFindMeDurationInput) {
                         nodeFindMeDurationInput.value = '5';
                     }
+                    if (nodeFindMeHelpText) {
+                        nodeFindMeHelpText.textContent = 'ESP32-S3 chip I/O (GPIO) index 0–48 to blink for Find Me.';
+                    }
                     if (nodeCanLinkIndicatorWrap) {
-                        if (node.node_type === 2) {
+                        if (isMechanicalNode) {
                             nodeCanLinkIndicatorWrap.classList.remove('hidden');
                             if (nodeCanLinkIndicatorInput) {
                                 const v = node.can_link_indicator_gpio;
@@ -1386,20 +1662,6 @@
                             }
                         } else {
                             nodeCanLinkIndicatorWrap.classList.add('hidden');
-                        }
-                    }
-                    if (nodeNightLightWrap) {
-                        if (node.node_type === 2) {
-                            nodeNightLightWrap.classList.remove('hidden');
-                            if (nodeNightLightEnabled)
-                                nodeNightLightEnabled.checked = !!node.night_light_on;
-                            const br = (node.night_light_brightness !== undefined) ? node.night_light_brightness : 30;
-                            if (nodeNightLightBrightness) {
-                                nodeNightLightBrightness.value = String(br);
-                                if (nodeNightLightBrightnessVal) nodeNightLightBrightnessVal.textContent = String(br);
-                            }
-                        } else {
-                            nodeNightLightWrap.classList.add('hidden');
                         }
                     }
                     if (inputCount === 0) {
@@ -1476,54 +1738,110 @@
                 }
             }
 
+            async function sendFindMeCommand(nodeId, durationMin, btnEl, origText, useWs2812Strip) {
+                if (btnEl) {
+                    btnEl.textContent = 'Sending...';
+                    btnEl.disabled = true;
+                }
+                try {
+                    if (!useWs2812Strip) {
+                        const outputIndex = nodeFindMeOutputInput
+                            ? parseInt(nodeFindMeOutputInput.value, 10) : 0;
+                        if (isNaN(outputIndex) || outputIndex < 0 || outputIndex > 48) {
+                            alert('Enter Find Me output index (ESP32-S3 GPIO) 0–48.');
+                            return;
+                        }
+                        const response1 = await fetch('/api/node/config', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                target_node_id: nodeId,
+                                command: 'set_find_me_output',
+                                output_index: outputIndex
+                            })
+                        });
+                        if (!response1.ok) throw new Error(await response1.text());
+                    }
+                    const response2 = await fetch('/api/node/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            target_node_id: nodeId,
+                            command: 'find_me',
+                            duration_min: durationMin
+                        })
+                    });
+                    if (!response2.ok) throw new Error(await response2.text());
+                    if (btnEl) {
+                        btnEl.textContent = 'Sent ' + durationMin + ' min';
+                        setTimeout(() => { btnEl.textContent = origText; btnEl.disabled = false; }, 2000);
+                    }
+                } catch (error) {
+                    console.error('Find Me:', error);
+                    alert('Error sending Find Me: ' + error.message);
+                    if (btnEl) {
+                        btnEl.textContent = origText;
+                        btnEl.disabled = false;
+                    }
+                }
+            }
+
             async function sendFindMeFromModal() {
                 if (currentConfiguringNodeId === null) return;
-                if (!nodeFindMeOutputInput || !nodeFindMeDurationInput || !findMeFromModalBtn) return;
-                const outputIndex = parseInt(nodeFindMeOutputInput.value, 10);
-                if (isNaN(outputIndex) || outputIndex < 0 || outputIndex > 48) {
-                    alert('Enter Find Me output index (ESP32-S3 GPIO) 0–48.');
-                    return;
-                }
+                if (!nodeFindMeDurationInput || !findMeFromModalBtn) return;
                 let duration = parseInt(nodeFindMeDurationInput.value, 10);
                 if (isNaN(duration) || duration < 1) duration = 1;
                 if (duration > 30) duration = 30;
                 nodeFindMeDurationInput.value = duration;
                 const origText = findMeFromModalBtn.textContent;
-                findMeFromModalBtn.textContent = 'Sending...';
-                findMeFromModalBtn.disabled = true;
+                await sendFindMeCommand(currentConfiguringNodeId, duration, findMeFromModalBtn, origText, false);
+            }
+
+            async function sendFindMeFromWs2812Modal() {
+                const nodeId = currentWs2812NodeId;
+                if (nodeId === null || !ws2812FindMeDurationInput || !findMeWs2812Btn) return;
+                let duration = parseInt(ws2812FindMeDurationInput.value, 10);
+                if (isNaN(duration) || duration < 1) duration = 1;
+                if (duration > 30) duration = 30;
+                ws2812FindMeDurationInput.value = duration;
+                const origText = findMeWs2812Btn.textContent;
+                await sendFindMeCommand(nodeId, duration, findMeWs2812Btn, origText, true);
+            }
+
+            async function sendClickEffectFromModal() {
+                const nodeId = currentWs2812NodeId;
+                if (ws2812UiLoading || nodeId === null) return;
+                const clickEffect = document.getElementById('nodeWs2812ClickEffect');
+                if (!clickEffect) return;
+                const effectVal = parseInt(clickEffect.value, 10);
+                const btn = saveWs2812EffectBtn;
+                const origText = btn ? btn.textContent : '';
+                if (btn) { btn.textContent = 'Sending...'; btn.disabled = true; }
                 try {
-                    const response1 = await fetch('/api/node/config', {
+                    const response = await fetch('/api/node/config', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            target_node_id: currentConfiguringNodeId,
-                            command: 'set_find_me_output',
-                            output_index: outputIndex
+                            target_node_id: nodeId,
+                            command: 'set_ws2812_click_effect',
+                            effect: (effectVal === 1) ? 'chase' : 'strobe'
                         })
                     });
-                    if (!response1.ok) throw new Error(await response1.text());
-                    const response2 = await fetch('/api/node/config', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            target_node_id: currentConfiguringNodeId,
-                            command: 'find_me',
-                            duration_min: duration
-                        })
-                    });
-                    if (!response2.ok) throw new Error(await response2.text());
-                    findMeFromModalBtn.textContent = 'Sent ' + duration + ' min';
-                    setTimeout(() => { findMeFromModalBtn.textContent = origText; findMeFromModalBtn.disabled = false; }, 2000);
+                    if (!response.ok) throw new Error(await response.text());
+                    if (btn) {
+                        btn.textContent = 'Saved';
+                        setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 1500);
+                    }
                 } catch (error) {
-                    console.error('Find Me from modal:', error);
-                    alert('Error sending Find Me: ' + error.message);
-                    findMeFromModalBtn.textContent = origText;
-                    findMeFromModalBtn.disabled = false;
+                    console.error('Set click effect:', error);
+                    alert('Error saving click effect: ' + error.message);
+                    if (btn) { btn.textContent = origText; btn.disabled = false; }
                 }
             }
 
             async function sendNightLightFromModal() {
-                if (currentConfiguringNodeId === null) return;
+                const nodeId = currentWs2812NodeId;
+                if (nodeId === null) return;
                 if (!nodeNightLightEnabled || !nodeNightLightBrightness || !setNightLightBtn) return;
                 const enabled = nodeNightLightEnabled.checked;
                 let brightness = parseInt(nodeNightLightBrightness.value, 10);
@@ -1538,7 +1856,7 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            target_node_id: currentConfiguringNodeId,
+                            target_node_id: nodeId,
                             command: 'set_night_light',
                             enabled: enabled,
                             brightness: brightness
@@ -1547,7 +1865,7 @@
                     if (!response.ok) throw new Error(await response.text());
                     setNightLightBtn.textContent = 'Saved';
                     setTimeout(() => { setNightLightBtn.textContent = origText; setNightLightBtn.disabled = false; }, 1500);
-                    loadNodeInputTypes(currentConfiguringNodeId);
+                    loadNodeWs2812Settings(nodeId);
                 } catch (error) {
                     console.error('Set night light:', error);
                     alert('Error: ' + error.message);

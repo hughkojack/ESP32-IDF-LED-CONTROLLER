@@ -591,6 +591,58 @@ static esp_err_t h_node_config_post(httpd_req_t* req) {
         payload[0] = (uint8_t)enabled;
         payload[1] = (uint8_t)brightness;
         plen = 2;
+    } else if (strcmp(cmd_str, "set_ws2812_click_effect") == 0) {
+        cmd_byte = CMD_SET_WS2812_CLICK_EFFECT;
+        int effect = 0;
+        if (auto* v = cJSON_GetObjectItem(root, "effect"); cJSON_IsString(v) && v->valuestring) {
+            if (strcmp(v->valuestring, "chase") == 0)
+                effect = 1;
+        } else if (auto* v = cJSON_GetObjectItem(root, "effect"); cJSON_IsNumber(v))
+            effect = (v->valueint != 0) ? 1 : 0;
+        payload[0] = (uint8_t)effect;
+        plen = 1;
+    } else if (strcmp(cmd_str, "set_ws2812_effect_params") == 0) {
+        cmd_byte = CMD_SET_WS2812_EFFECT_PARAMS;
+        int effect_id = -1;
+        if (auto* v = cJSON_GetObjectItem(root, "effect"); cJSON_IsString(v) && v->valuestring) {
+            if (strcmp(v->valuestring, "strobe") == 0) effect_id = 0;
+            else if (strcmp(v->valuestring, "chase") == 0) effect_id = 1;
+            else if (strcmp(v->valuestring, "find_me") == 0) effect_id = 2;
+        } else if (auto* v = cJSON_GetObjectItem(root, "effect"); cJSON_IsNumber(v)) {
+            effect_id = v->valueint;
+        }
+        if (effect_id < 0 || effect_id > 2) {
+            cJSON_Delete(root);
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "effect must be strobe/chase/find_me or 0/1/2");
+        }
+        int r = 0, g = 0, b = 0;
+        if (auto* rgb = cJSON_GetObjectItem(root, "rgb"); cJSON_IsArray(rgb) && cJSON_GetArraySize(rgb) >= 3) {
+            r = cJSON_GetArrayItem(rgb, 0)->valueint;
+            g = cJSON_GetArrayItem(rgb, 1)->valueint;
+            b = cJSON_GetArrayItem(rgb, 2)->valueint;
+        } else {
+            if (auto* v = cJSON_GetObjectItem(root, "r"); cJSON_IsNumber(v)) r = v->valueint;
+            if (auto* v = cJSON_GetObjectItem(root, "g"); cJSON_IsNumber(v)) g = v->valueint;
+            if (auto* v = cJSON_GetObjectItem(root, "b"); cJSON_IsNumber(v)) b = v->valueint;
+        }
+        if (r < 0) r = 0;
+        if (r > 255) r = 255;
+        if (g < 0) g = 0;
+        if (g > 255) g = 255;
+        if (b < 0) b = 0;
+        if (b > 255) b = 255;
+        int timing_ms = 100;
+        if (auto* v = cJSON_GetObjectItem(root, "timing_ms"); cJSON_IsNumber(v))
+            timing_ms = v->valueint;
+        if (timing_ms < 10) timing_ms = 10;
+        if (timing_ms > 2000) timing_ms = 2000;
+        payload[0] = (uint8_t)effect_id;
+        payload[1] = (uint8_t)r;
+        payload[2] = (uint8_t)g;
+        payload[3] = (uint8_t)b;
+        payload[4] = (uint8_t)(timing_ms & 0xFF);
+        payload[5] = (uint8_t)((timing_ms >> 8) & 0xFF);
+        plen = 6;
     } else if (strcmp(cmd_str, "reboot") == 0) {
         cmd_byte = CMD_REBOOT;
         plen = 0;
@@ -648,8 +700,9 @@ static esp_err_t h_can_history(httpd_req_t *req) {
                 continue;
             }
 
-            const uint16_t sid = getStandardId(f.id);
-            CanMessageType msgType = getMessageType(sid);
+            const uint16_t raw_sid = getStandardId(f.id);
+            CanMessageType msgType = resolveMessageType(raw_sid, f.data, f.dlc);
+            const uint16_t sid = canonicalSid(raw_sid, msgType);
 
             if (static_cast<uint8_t>(msgType) == static_cast<uint8_t>(LIGHTING_COMMAND)) {
                 if (f.dlc >= 2) {
@@ -695,6 +748,7 @@ static esp_err_t h_nodes_get(httpd_req_t* req) {
     }
     return send_json(req, nodes_array);
 }
+
 
 // POST /api/ota
 static esp_err_t h_ota(httpd_req_t* req) {
@@ -800,6 +854,10 @@ static esp_err_t h_state_get(httpd_req_t* req) {
 namespace HSG {
 namespace API {
 
+httpd_handle_t http_server() {
+    return g_http;
+}
+
 esp_mqtt_client_handle_t get_mqtt_client() {
     return g_mqtt_client; 
 }
@@ -849,7 +907,6 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     httpd_uri_t nodes_get = { .uri="/api/nodes", .method=HTTP_GET, .handler=h_nodes_get, .user_ctx=nullptr };
     httpd_uri_t node_config_post = { .uri="/api/node/config", .method=HTTP_POST, .handler=h_node_config_post, .user_ctx=nullptr };
     httpd_uri_t node_remove_post = { .uri="/api/node/remove", .method=HTTP_POST, .handler=h_node_remove_post, .user_ctx=nullptr };
-
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &node_remove_post));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &node_config_post));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &can_history));
@@ -950,9 +1007,15 @@ esp_err_t start(const Init& cfg) {
     ESP_LOGI(TAG, "Configuration loaded, signaling event group.");
 
     httpd_config_t conf = HTTPD_DEFAULT_CONFIG();
-    conf.max_uri_handlers = 16;   // more routes
+    conf.max_uri_handlers = 20;   // more routes
     conf.lru_purge_enable = true;
     conf.server_port = 80;
+    conf.recv_wait_timeout = 300;
+    conf.send_wait_timeout = 30;
+    conf.keep_alive_enable = true;
+    conf.keep_alive_idle = 30;
+    conf.keep_alive_interval = 10;
+    conf.keep_alive_count = 10;
 //    conf.max_open_sockets = 10; // by adding this config the web server will stop working.
     conf.stack_size = 8192;
     

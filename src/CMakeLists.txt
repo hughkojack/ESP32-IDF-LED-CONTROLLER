@@ -18,6 +18,7 @@ endif()
 idf_component_register(
     SRCS
         "main.cpp"
+        "can_tunnel.cpp"
     INCLUDE_DIRS
         "."
     PRIV_REQUIRES
@@ -31,6 +32,7 @@ idf_component_register(
         esp_netif
         esp_http_server
         nvs_flash
+        esp_partition
         esp_eth
         cJSON
         freertos

@@ -35,8 +35,12 @@ Where:
 |------|-------|-------------|--------|
 | 0 | node_type | Node hardware type | `1` = LCD, `2` = Mechanical |
 | 1 | input_count | Number of inputs/buttons | `1-255` |
+| 2–3 | fw_version | Firmware version (uint16 LE) | e.g. `0x0100` = v1.0; `0` if unknown |
+| 4 | ota_capable | CAN OTA support | `1` = node accepts FIRMWARE messages; `0` = USB-only |
 
-**Additional bytes (2-7):** Currently ignored by hub, can be zero or unused.
+**Bytes 5–7:** Reserved; send zero or omit (DLC may be 2, 5, or 8).
+
+Hub ignores bytes 5–7. Nodes with DLC &lt; 5 are treated as legacy (no version / not OTA-capable).
 
 ## Implementation Requirements
 
@@ -65,16 +69,19 @@ uint8_t input_count = 4; // Number of buttons
 // Build CAN ID
 uint16_t can_id = (0x8 << 7) | node_id;  // 0x3FF for unconfigured
 
-// Build payload
+// Build payload (extended heartbeat for OTA-capable mechanical nodes)
 uint8_t payload[8] = {0};
 payload[0] = node_type;
 payload[1] = input_count;
+payload[2] = (uint8_t)(FW_VERSION & 0xFF);
+payload[3] = (uint8_t)(FW_VERSION >> 8);
+payload[4] = OTA_CAPABLE ? 1 : 0;
 
 // Send CAN frame
 can_frame frame;
 frame.can_id = can_id;
-frame.can_dlc = 2;
-memcpy(frame.data, payload, 2);
+frame.can_dlc = 5;
+memcpy(frame.data, payload, 5);
 send_can_frame(&frame);
 ```
 

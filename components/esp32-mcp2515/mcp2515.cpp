@@ -75,8 +75,7 @@ MCP2515::ERROR MCP2515::reset(void)
     // do not filter any extended frames for RXF1 used by RXB1
     RXF filters[] = {RXF0, RXF1, RXF2, RXF3, RXF4, RXF5};
     for (int i=0; i<6; i++) {
-        bool ext = (i == 1);
-        ERROR result = setFilter(filters[i], ext, 0);
+        ERROR result = setFilter(filters[i], false, 0);
         if (result != ERROR_OK) {
             return result;
         }
@@ -84,7 +83,7 @@ MCP2515::ERROR MCP2515::reset(void)
 
     MASK masks[] = {MASK0, MASK1};
     for (int i=0; i<2; i++) {
-        ERROR result = setFilterMask(masks[i], true, 0);
+        ERROR result = setFilterMask(masks[i], false, 0);
         if (result != ERROR_OK) {
             return result;
         }
@@ -121,20 +120,15 @@ uint8_t MCP2515::readRegister(const REGISTER reg)
 
 void MCP2515::readRegisters(const REGISTER reg, uint8_t values[], const uint8_t n)
 {
-    // startSPI();
-    // SPI.transfer(INSTRUCTION_READ);
-    // SPI.transfer(reg);
-    // // mcp2515 has auto-increment of address-pointer
-    // for (uint8_t i=0; i<n; i++) {
-    //     values[i] = SPI.transfer(0x00);
-    // }
-    // endSPI();
+    if (n == 0)
+        return;
 
     uint8_t rx_data[n + 2];
     uint8_t tx_data[n + 2];
 
     tx_data[0] = INSTRUCTION_READ;
     tx_data[1] = reg;
+    memset(&tx_data[2], 0, n);
 
     spi_transaction_t trans = {};
 
@@ -142,14 +136,13 @@ void MCP2515::readRegisters(const REGISTER reg, uint8_t values[], const uint8_t 
     trans.rx_buffer = rx_data;
     trans.tx_buffer = tx_data;
 
-
     esp_err_t ret = spi_device_transmit(*spi, &trans);
     if (ret != ESP_OK) {
         printf("spi_device_transmit failed\n");
     }
 
     for (uint8_t i = 0; i < n; i++) {
-        values[i] = rx_data[i+2];
+        values[i] = rx_data[i + 2];
     }
 }
 
@@ -837,34 +830,37 @@ MCP2515::ERROR MCP2515::sendMessageSkipStatus(const struct can_frame *frame)
 MCP2515::ERROR MCP2515::readMessage(const RXBn rxbn, struct can_frame *frame)
 {
     const struct RXBn_REGS *rxb = &RXB[rxbn];
+    const uint8_t base = (uint8_t)rxb->SIDH;
 
-    uint8_t tbufdata[5];
+    const uint8_t sidh = readRegister((REGISTER)base);
+    const uint8_t sidl = readRegister((REGISTER)(base + MCP_SIDL));
+    const uint8_t eid8 = readRegister((REGISTER)(base + MCP_EID8));
+    const uint8_t eid0 = readRegister((REGISTER)(base + MCP_EID0));
+    const uint8_t dlc_byte = readRegister((REGISTER)(base + MCP_DLC));
 
-    readRegisters(rxb->SIDH, tbufdata, 5);
+    uint32_t id = ((uint32_t)sidh << 3) | ((sidl & 0xE0U) >> 5);
 
-    uint32_t id = (tbufdata[MCP_SIDH]<<3) + (tbufdata[MCP_SIDL]>>5);
-
-    if ( (tbufdata[MCP_SIDL] & TXB_EXIDE_MASK) ==  TXB_EXIDE_MASK ) {
-        id = (id<<2) + (tbufdata[MCP_SIDL] & 0x03);
-        id = (id<<8) + tbufdata[MCP_EID8];
-        id = (id<<8) + tbufdata[MCP_EID0];
+    if ((sidl & TXB_EXIDE_MASK) == TXB_EXIDE_MASK) {
+        id = (id << 2) + (sidl & 0x03);
+        id = (id << 8) + eid8;
+        id = (id << 8) + eid0;
         id |= CAN_EFF_FLAG;
     }
 
-    uint8_t dlc = (tbufdata[MCP_DLC] & DLC_MASK);
+    uint8_t dlc = (dlc_byte & DLC_MASK);
     if (dlc > CAN_MAX_DLEN) {
         return ERROR_FAIL;
     }
 
-    uint8_t ctrl = readRegister(rxb->CTRL);
-    if (ctrl & RXBnCTRL_RTR) {
+    if (dlc_byte & RTR_MASK) {
         id |= CAN_RTR_FLAG;
     }
 
     frame->can_id = id;
     frame->can_dlc = dlc;
-
-    readRegisters(rxb->DATA, frame->data, dlc);
+    for (uint8_t i = 0; i < dlc; i++) {
+        frame->data[i] = readRegister((REGISTER)((uint8_t)rxb->DATA + i));
+    }
 
     modifyRegister(MCP_CANINTF, rxb->CANINTF_RXnIF, 0);
 

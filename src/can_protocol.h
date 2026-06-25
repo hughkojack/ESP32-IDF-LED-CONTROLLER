@@ -28,7 +28,9 @@ enum CanMessageType : uint8_t {
     SENSOR_DATA      = 0x2, // A message containing sensor readings
     NODE_CONFIG      = 0x3, // Hub -> node: configuration (set node ID, find-me, etc.)
     NODE_STATE_FEEDBACK = 0x4, // Hub -> node: per-button brightness 0-100 or 0xFF (payload 4 bytes)
-    HEARTBEAT        = 0x8  // Node -> hub: announce/heartbeat (node_id, type, input_count)
+    HEARTBEAT        = 0x8,  // Node -> hub: announce/heartbeat (node_id, type, input_count)
+    CAN_OTA_REMOTE   = 0xE,  // Hub -> node: mcp-can-boot-style OTA (low bus priority)
+    CAN_OTA_NODE     = 0xF,  // Node -> hub: OTA responses (wins arbitration over REMOTE)
 };
 
 // Unconfigured node ID (127): hub detects new nodes; valid configured IDs 1..126
@@ -47,6 +49,26 @@ enum CanMessageType : uint8_t {
 #define CMD_SET_CAN_LINK_INDICATOR 0x0A  // payload: [gpio]; GPIO 0-48 for CAN link LED (solid=good link, flash=bad/no link), 0xFF=disable
 #define CMD_SET_TIMEZONE          0x0B  // payload: multi-frame like CMD_SET_INPUT_LABEL: byte 1 = total_len (first) or 0xFF (cont.), bytes 2-7 = TZ string (6 chars/frame); hub sends before CMD_SET_DATETIME so LCD can use localtime()
 #define CMD_SET_NIGHT_LIGHT       0x0C  // payload: [enabled 0/1, brightness 0-100]; mechanical WS2812 night light
+#define CMD_SET_WS2812_CLICK_EFFECT 0x0D  // payload: [effect 0=strobe, 1=chase]; click/double-click LED feedback (NVS)
+#define CMD_SET_WS2812_EFFECT_PARAMS 0x0E  // payload: [effect_id, r, g, b, timing_ms u16 LE]; store only (NVS)
+
+// CAN OTA (mcp-can-boot-style; CAN_OTA_REMOTE / CAN_OTA_NODE)
+// 8-byte payload: [node_id u16 BE][opcode][meta][data or offset u32 BE]
+#define OTA_FLASH_READY      0x04  // node -> hub: ready; bytes 4-7 = next write offset u32 BE
+#define OTA_FLASH_INIT       0x06  // hub -> node: start; bytes 4-7 = image size u32 BE
+#define OTA_FLASH_DATA       0x08  // hub -> node: byte3 = (len<<5)|(offset&0x1F); bytes 4-7 = data (max 4)
+#define OTA_FLASH_DATA_ERR   0x0D  // node -> hub: offset mismatch; bytes 4-7 = expected offset u32 BE
+#define OTA_FLASH_DONE       0x10  // hub -> node: end; bytes 4-7 = CRC32 BE (0 = streaming finalize)
+#define OTA_FLASH_COMPLETE   0x14  // node -> hub: success
+#define OTA_FLASH_ERROR      0x15  // node -> hub: failure; byte 4 = reason
+#define OTA_FLASH_ABORT      0x18  // either: cancel
+#define OTA_DATA_BYTES_PER_FRAME  4
+#if OTA_DATA_BYTES_PER_FRAME > 4
+#error OTA_DATA_BYTES_PER_FRAME cannot exceed 4 (CAN DATA uses bytes 4-7 only)
+#endif
+/* Bytes per READY handshake (stop-and-wait ACK unit). Tune for speed in phase 2. */
+#define OTA_SEGMENT_BYTES         4
+#define OTA_TRANSFER_BLOCK_BYTES  OTA_SEGMENT_BYTES
 
 // Node types
 #define NODE_TYPE_LCD        1
@@ -137,9 +159,38 @@ inline uint16_t getStandardId(uint32_t canId) {
  * @param canId The 11-bit CAN ID received from the bus.
  * @return The CanMessageType enum.
  */
-inline CanMessageType getMessageType(uint32_t canId) {
-    const uint16_t sid = getStandardId(canId);
+inline CanMessageType peekMessageType(uint16_t sid) {
     return (CanMessageType)((sid >> 7) & 0x0F);
+}
+
+inline CanMessageType getMessageType(uint32_t canId) {
+    return peekMessageType(getStandardId(canId));
+}
+
+/* Recover message type when MCP2515 RX drops SIDH bit7 (msg types >= 8 become sid = node_id only). */
+inline CanMessageType resolveMessageType(uint16_t sid, const uint8_t* data, uint8_t dlc) {
+    CanMessageType msgType = peekMessageType(sid);
+    if (msgType != 0 || !data)
+        return msgType;
+    if (sid <= 126 && dlc >= 2
+        && (data[0] == NODE_TYPE_LCD || data[0] == NODE_TYPE_MECHANICAL)
+        && data[1] >= 1 && data[1] <= 6) {
+        return HEARTBEAT;
+    }
+    if (sid <= 126 && dlc >= 3) {
+        const uint8_t op = data[2];
+        if (op == OTA_FLASH_READY || op == OTA_FLASH_DATA_ERR || op == OTA_FLASH_COMPLETE
+            || op == OTA_FLASH_ERROR) {
+            return CAN_OTA_NODE;
+        }
+    }
+    return msgType;
+}
+
+inline uint16_t canonicalSid(uint16_t sid, CanMessageType msgType) {
+    if (peekMessageType(sid) == (uint8_t)msgType)
+        return sid;
+    return createCanId(msgType, (uint8_t)(sid & 0x7F));
 }
 
 /**
@@ -150,6 +201,27 @@ inline CanMessageType getMessageType(uint32_t canId) {
 inline uint8_t getNodeId(uint32_t canId) {
     const uint16_t sid = getStandardId(canId);
     return (uint8_t)(sid & 0x7F);
+}
+
+inline bool isCanOtaNodeMessage(CanMessageType msgType) {
+    return msgType == CAN_OTA_NODE;
+}
+
+inline uint32_t otaReadOffsetBe(const uint8_t* data) {
+    return ((uint32_t)data[4] << 24) | ((uint32_t)data[5] << 16)
+         | ((uint32_t)data[6] << 8) | (uint32_t)data[7];
+}
+
+inline void otaWriteOffsetBe(uint8_t* data, uint32_t offset) {
+    data[4] = (uint8_t)((offset >> 24) & 0xFF);
+    data[5] = (uint8_t)((offset >> 16) & 0xFF);
+    data[6] = (uint8_t)((offset >> 8) & 0xFF);
+    data[7] = (uint8_t)(offset & 0xFF);
+}
+
+inline void otaWriteNodeIdBe(uint8_t* data, uint16_t node_id) {
+    data[0] = (uint8_t)((node_id >> 8) & 0xFF);
+    data[1] = (uint8_t)(node_id & 0xFF);
 }
 
 #endif // CAN_PROTOCOL_H

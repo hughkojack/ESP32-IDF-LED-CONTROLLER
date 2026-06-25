@@ -53,9 +53,12 @@ struct Init {
     std::function<std::string()> get_rtc_time_cb;
     // Return current hub (system) time string for display. Optional.
     std::function<std::string()> get_system_time_cb;
+
 };
 
 esp_err_t register_uris(httpd_handle_t server, const Init& init);
+
+httpd_handle_t http_server();
 
 // Call once after networking is up (Wi-Fi or ETH has an IP).
 // Starts the HTTP server (port 80) and registers all /api/* handlers.
