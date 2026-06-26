@@ -66,9 +66,10 @@ enum CanMessageType : uint8_t {
 #if OTA_DATA_BYTES_PER_FRAME > 4
 #error OTA_DATA_BYTES_PER_FRAME cannot exceed 4 (CAN DATA uses bytes 4-7 only)
 #endif
-/* Bytes per READY handshake (stop-and-wait ACK unit). Tune for speed in phase 2. */
+/* FLASH_INIT byte 3: 0 = legacy 4-byte blocks; 16 or 32 = multi-frame block per READY */
 #define OTA_SEGMENT_BYTES         4
-#define OTA_TRANSFER_BLOCK_BYTES  OTA_SEGMENT_BYTES
+#define OTA_TRANSFER_BLOCK_BYTES  16
+#define OTA_BLOCK_BUF_MAX         32
 
 // Node types
 #define NODE_TYPE_LCD        1

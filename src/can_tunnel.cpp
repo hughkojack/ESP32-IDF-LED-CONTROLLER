@@ -153,7 +153,7 @@ static int tunnel_drain_can_to_tcp(int client_fd) {
 }
 
 static bool tunnel_drain_can_burst(int client_fd) {
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < 32; i++) {
         const int n = tunnel_drain_can_to_tcp(client_fd);
         if (n < 0)
             return false;
@@ -200,7 +200,7 @@ static void tunnel_task(void* arg) {
             }
             int yes = 1;
             setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));
-            struct timeval tv = { .tv_sec = 0, .tv_usec = 10000 };
+            struct timeval tv = { .tv_sec = 0, .tv_usec = 1000 };
             setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
             s_client_fd = fd;
             s_client_connected = true;
@@ -235,8 +235,26 @@ static void tunnel_task(void* arg) {
                     continue;
                 }
                 if (!tunnel_send_can(&tx)) {
-                    ESP_LOGW(TAG, "tunnel CAN TX failed");
+                    ESP_LOGW(TAG, "tunnel CAN TX failed, retrying frame");
+                    break;
                 }
+                if (!tunnel_drain_can_burst(s_client_fd)) {
+                    ESP_LOGI(TAG, "tunnel TCP send failed, closing client");
+                    close_client_locked();
+                    rx_len = 0;
+                    break;
+                }
+                memmove(rx_buf, rx_buf + CAN_TUNNEL_FRAME_SIZE, rx_len - CAN_TUNNEL_FRAME_SIZE);
+                rx_len -= CAN_TUNNEL_FRAME_SIZE;
+            }
+            /* Retry any TCP frame that could not be sent on CAN yet. */
+            while (rx_len >= CAN_TUNNEL_FRAME_SIZE
+                   && rx_buf[0] == kMagic0 && rx_buf[1] == kMagic1) {
+                can_frame tx;
+                if (!decode_frame(rx_buf, &tx))
+                    break;
+                if (!tunnel_send_can(&tx))
+                    break;
                 if (!tunnel_drain_can_burst(s_client_fd)) {
                     ESP_LOGI(TAG, "tunnel TCP send failed, closing client");
                     close_client_locked();
