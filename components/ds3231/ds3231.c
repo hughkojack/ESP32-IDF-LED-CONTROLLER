@@ -2,9 +2,32 @@
  * DS3231 I2C RTC driver - read/write time registers in BCD.
  */
 #include "ds3231.h"
+#include "i2c_bus_lock.h"
 #include "driver/i2c_master.h"
 #include "freertos/FreeRTOS.h"
 #include <string.h>
+
+#define I2C_XFER_TIMEOUT_MS 100
+
+static bool s_installed = false;
+static uint8_t s_i2c_addr = 0;
+
+void ds3231_mark_installed(bool installed)
+{
+    s_installed = installed;
+    if (!installed)
+        s_i2c_addr = 0;
+}
+
+bool ds3231_is_installed(void)
+{
+    return s_installed;
+}
+
+uint8_t ds3231_get_i2c_addr(void)
+{
+    return s_installed ? s_i2c_addr : 0;
+}
 
 /* DS3231 time/date registers (BCD) */
 #define DS3231_REG_SECONDS  0x00
@@ -26,35 +49,59 @@ static inline uint8_t byte_to_bcd(uint8_t byte)
     return (uint8_t)(((byte / 10) << 4) | (byte % 10));
 }
 
+static esp_err_t ds3231_read_regs(i2c_master_bus_handle_t bus, uint8_t addr, uint8_t *regs);
+
 static esp_err_t ds3231_transfer(i2c_master_bus_handle_t bus, uint8_t addr,
     const uint8_t *wbuf, size_t wlen, uint8_t *rbuf, size_t rlen)
 {
+    if (!i2c_bus_lock(pdMS_TO_TICKS(I2C_XFER_TIMEOUT_MS))) {
+        return ESP_ERR_TIMEOUT;
+    }
+
     i2c_device_config_t dev_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = addr,
-        .scl_speed_hz = 400000,
+        .scl_speed_hz = 100000,
     };
     i2c_master_dev_handle_t dev;
     esp_err_t ret = i2c_master_bus_add_device(bus, &dev_cfg, &dev);
-    if (ret != ESP_OK) return ret;
-
-    if (wlen > 0 && rlen > 0) {
-        ret = i2c_master_transmit_receive(dev, wbuf, wlen, rbuf, rlen, pdMS_TO_TICKS(100));
-    } else if (wlen > 0) {
-        ret = i2c_master_transmit(dev, wbuf, wlen, pdMS_TO_TICKS(100));
-    } else {
-        ret = i2c_master_receive(dev, rbuf, rlen, pdMS_TO_TICKS(100));
+    if (ret != ESP_OK) {
+        i2c_bus_unlock();
+        return ret;
     }
-    i2c_master_bus_rm_device(dev);
-    return ret;
+
+    const TickType_t xfer_timeout = pdMS_TO_TICKS(I2C_XFER_TIMEOUT_MS);
+    if (wlen > 0 && rlen > 0) {
+        ret = i2c_master_transmit_receive(dev, wbuf, wlen, rbuf, rlen, xfer_timeout);
+    } else if (wlen > 0) {
+        ret = i2c_master_transmit(dev, wbuf, wlen, xfer_timeout);
+    } else {
+        ret = i2c_master_receive(dev, rbuf, rlen, xfer_timeout);
+    }
+    esp_err_t rm = i2c_bus_remove_device_safe(bus, dev, ret);
+    i2c_bus_unlock();
+    if (ret == ESP_ERR_TIMEOUT)
+        i2c_bus_recover(bus);
+    return rm;
 }
 
 bool ds3231_probe(i2c_master_bus_handle_t bus)
 {
-    if (i2c_master_probe(bus, DS3231_I2C_ADDR, pdMS_TO_TICKS(100)) == ESP_OK)
+    uint8_t regs[7];
+    esp_err_t ret = ds3231_read_regs(bus, DS3231_I2C_ADDR, regs);
+    if (ret == ESP_OK) {
+        s_i2c_addr = DS3231_I2C_ADDR;
         return true;
-    if (i2c_master_probe(bus, DS3231_I2C_ADDR_ALT, pdMS_TO_TICKS(100)) == ESP_OK)
+    }
+    if (ret == ESP_ERR_TIMEOUT)
+        i2c_bus_recover(bus);
+    ret = ds3231_read_regs(bus, DS3231_I2C_ADDR_ALT, regs);
+    if (ret == ESP_OK) {
+        s_i2c_addr = DS3231_I2C_ADDR_ALT;
         return true;
+    }
+    if (ret == ESP_ERR_TIMEOUT)
+        i2c_bus_recover(bus);
     return false;
 }
 
@@ -68,16 +115,23 @@ static esp_err_t ds3231_read_regs(i2c_master_bus_handle_t bus, uint8_t addr, uin
 /* Determine which I2C address responds (0x68 or 0x69) */
 static uint8_t ds3231_resolve_addr(i2c_master_bus_handle_t bus)
 {
+    if (s_i2c_addr != 0)
+        return s_i2c_addr;
     uint8_t regs[7];
-    if (ds3231_read_regs(bus, DS3231_I2C_ADDR, regs) == ESP_OK)
-        return DS3231_I2C_ADDR;
-    if (ds3231_read_regs(bus, DS3231_I2C_ADDR_ALT, regs) == ESP_OK)
-        return DS3231_I2C_ADDR_ALT;
+    if (ds3231_read_regs(bus, DS3231_I2C_ADDR, regs) == ESP_OK) {
+        s_i2c_addr = DS3231_I2C_ADDR;
+        return s_i2c_addr;
+    }
+    if (ds3231_read_regs(bus, DS3231_I2C_ADDR_ALT, regs) == ESP_OK) {
+        s_i2c_addr = DS3231_I2C_ADDR_ALT;
+        return s_i2c_addr;
+    }
     return 0;
 }
 
 esp_err_t ds3231_get_time(i2c_master_bus_handle_t bus, struct tm *out_tm)
 {
+    if (!s_installed) return ESP_ERR_NOT_FOUND;
     if (!bus || !out_tm) return ESP_ERR_INVALID_ARG;
 
     uint8_t addr = ds3231_resolve_addr(bus);
@@ -107,6 +161,7 @@ esp_err_t ds3231_get_time(i2c_master_bus_handle_t bus, struct tm *out_tm)
 
 esp_err_t ds3231_set_time(i2c_master_bus_handle_t bus, const struct tm *tm)
 {
+    if (!s_installed) return ESP_ERR_NOT_FOUND;
     if (!bus || !tm) return ESP_ERR_INVALID_ARG;
 
     uint8_t addr = ds3231_resolve_addr(bus);
@@ -135,6 +190,7 @@ esp_err_t ds3231_set_time(i2c_master_bus_handle_t bus, const struct tm *tm)
 
 esp_err_t ds3231_get_status(i2c_master_bus_handle_t bus, uint8_t *out_status)
 {
+    if (!s_installed) return ESP_ERR_NOT_FOUND;
     if (!bus || !out_status) return ESP_ERR_INVALID_ARG;
     uint8_t addr = ds3231_resolve_addr(bus);
     if (addr == 0) return ESP_ERR_NOT_FOUND;

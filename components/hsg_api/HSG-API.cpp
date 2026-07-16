@@ -1,11 +1,14 @@
 #include "HSG-API.h"
-//#include "hsg_outputs.h"
+#include "i2c_bus_lock.h"
 #include "mqtt_client.h"
+
+extern "C" int hsg_outputs_get_mapped_count(void);
 
 #include <cstring>
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <algorithm>
 #include "esp_log.h"
 #include "esp_err.h"
 #include "esp_netif.h"
@@ -25,6 +28,7 @@
 #include "lwip/opt.h"
 #include "hardware_config.h"
 #include "can_protocol.h"
+#include "ds3231.h"
 
 static const char* TAG = "HSG-API";
 static const char* NVS_NS = "cfg";
@@ -117,10 +121,22 @@ static void ensure_layout(cJSON* root) {
     if (!nodes) cJSON_AddItemToObject(config, "nodes", nodes = cJSON_CreateArray());
 }
 
+static esp_err_t i2c_probe_addr(i2c_master_bus_handle_t bus, uint8_t addr7) {
+    if (!i2c_bus_lock(pdMS_TO_TICKS(100))) {
+        return ESP_ERR_TIMEOUT;
+    }
+    esp_err_t ret = i2c_master_probe(bus, addr7, pdMS_TO_TICKS(100));
+    i2c_bus_unlock();
+    /* NACK at empty addresses is normal during scan — do not reset the whole bus. */
+    if (ret == ESP_ERR_TIMEOUT) {
+        i2c_bus_recover(bus);
+    }
+    return ret;
+}
+
 // Probe an I2C address using the ESP-IDF v5+ I²C master API
 static esp_err_t i2c_probe(i2c_master_bus_handle_t bus, uint8_t addr7) {
-    // i2c_master_probe() returns ESP_OK if the device ACKs
-    esp_err_t ret = i2c_master_probe(bus, addr7, pdMS_TO_TICKS(100));
+    esp_err_t ret = i2c_probe_addr(bus, addr7);
     if (ret == ESP_OK) {
         ESP_LOGI("HSG-API", "Found I2C device at 0x%02X", addr7);
     }
@@ -128,26 +144,181 @@ static esp_err_t i2c_probe(i2c_master_bus_handle_t bus, uint8_t addr7) {
 }
 
 static std::vector<uint8_t> scan_pca9685_addrs(i2c_port_t port) {
+    (void)port;
     std::vector<uint8_t> found;
-    for (uint8_t addr = 0x40; addr <= 0x47; ++addr) {
-        if (addr == 0x70) continue; // ignore All-Call
-        if (i2c_probe(i2c_bus_handle, addr) == ESP_OK) {
-//            ESP_LOGI(TAG, "Found I2C device at 0x%02X", addr);
-            found.push_back(addr);
-        }
-    }
-    return found;
-}
-
-// Probe DS3231 RTC addresses (0x68, 0x69) for "other devices" list in scan response
-static std::vector<uint8_t> scan_rtc_addrs() {
-    std::vector<uint8_t> found;
-    const uint8_t addrs[] = { 0x68, 0x69 };
+#if defined(BOARD_RACK32)
+    static const uint8_t addrs[] = { 0x40, 0x41, 0x42 };
     for (uint8_t addr : addrs) {
         if (i2c_probe(i2c_bus_handle, addr) == ESP_OK)
             found.push_back(addr);
     }
+#else
+    for (uint8_t addr = 0x40; addr <= 0x47; ++addr) {
+        if (addr == 0x70) continue;
+        if (i2c_probe(i2c_bus_handle, addr) == ESP_OK)
+            found.push_back(addr);
+    }
+#endif
     return found;
+}
+
+// Report DS3231 from boot probe (register read) — avoid i2c_master_probe at 0x68/0x69 during scan.
+static std::vector<uint8_t> scan_rtc_addrs() {
+    std::vector<uint8_t> found;
+    uint8_t addr = ds3231_get_i2c_addr();
+    if (addr != 0)
+        found.push_back(addr);
+    return found;
+}
+
+// Probe MCP9808 address range (0x18–0x1F) for scan "other devices" list
+static std::vector<uint8_t> scan_mcp9808_addrs() {
+    std::vector<uint8_t> found;
+#if defined(BOARD_RACK32)
+    (void)found;
+    return found;
+#else
+    for (uint8_t addr = 0x18; addr <= 0x1F; ++addr) {
+        if (i2c_probe(i2c_bus_handle, addr) == ESP_OK)
+            found.push_back(addr);
+    }
+    return found;
+#endif
+}
+
+static std::vector<uint8_t> get_configured_pca9685_addrs() {
+    std::vector<uint8_t> configured;
+    std::string cfg_text = HSG::API::get_config_json();
+    cJSON* config = cJSON_Parse(cfg_text.c_str());
+    if (!config) return configured;
+    cJSON* i2c = cJSON_GetObjectItem(config, "i2c");
+    cJSON* pca = i2c ? cJSON_GetObjectItem(i2c, "pca9685") : nullptr;
+    if (cJSON_IsObject(pca)) {
+        for (cJSON* child = pca->child; child; child = child->next) {
+            if (child->string) {
+                unsigned long addr = strtoul(child->string, nullptr, 16);
+                if (addr <= 0x7F)
+                    configured.push_back((uint8_t)addr);
+            }
+        }
+    }
+    cJSON_Delete(config);
+    return configured;
+}
+
+#if defined(BOARD_RACK32)
+static bool pca_config_has_output_mappings(cJSON* pca)
+{
+    if (!cJSON_IsObject(pca))
+        return false;
+    for (cJSON* board = pca->child; board; board = board->next) {
+        if (!cJSON_IsArray(board))
+            continue;
+        cJSON* ch = nullptr;
+        cJSON_ArrayForEach(ch, board) {
+            if (cJSON_IsNumber(ch) && ch->valueint > 0)
+                return true;
+        }
+    }
+    return false;
+}
+
+static cJSON* make_pca_output_array(int first_output)
+{
+    cJSON* arr = cJSON_CreateArray();
+    for (int i = 0; i < 16; ++i)
+        cJSON_AddItemToArray(arr, cJSON_CreateNumber(first_output + i));
+    return arr;
+}
+
+static void seed_rack32_pca_defaults(cJSON* pca)
+{
+    static const struct { uint8_t addr; int first_out; } defaults[] = {
+        { 0x40, 1 }, { 0x41, 17 }, { 0x42, 33 },
+    };
+    for (const auto& entry : defaults) {
+        char key[6];
+        snprintf(key, sizeof(key), "0x%02X", entry.addr);
+        cJSON_DeleteItemFromObject(pca, key);
+        cJSON_AddItemToObject(pca, key, make_pca_output_array(entry.first_out));
+        ESP_LOGI(TAG, "Rack32 default map: %s -> outputs %d-%d",
+                 key, entry.first_out, entry.first_out + 15);
+    }
+}
+#endif
+
+static void add_addr_array_json(cJSON* parent, const char* key, const std::vector<uint8_t>& addrs) {
+    cJSON* arr = cJSON_CreateArray();
+    for (uint8_t a : addrs)
+        cJSON_AddItemToArray(arr, cJSON_CreateNumber(a));
+    cJSON_AddItemToObject(parent, key, arr);
+}
+
+static void diff_pca_addrs(const std::vector<uint8_t>& detected,
+                           const std::vector<uint8_t>& configured,
+                           std::vector<uint8_t>& to_remove,
+                           std::vector<uint8_t>& to_add) {
+    for (uint8_t c : configured) {
+        bool found = false;
+        for (uint8_t d : detected) {
+            if (d == c) { found = true; break; }
+        }
+        if (!found) to_remove.push_back(c);
+    }
+    for (uint8_t d : detected) {
+        bool found = false;
+        for (uint8_t c : configured) {
+            if (d == c) { found = true; break; }
+        }
+        if (!found) to_add.push_back(d);
+    }
+}
+
+// prune PCA9685 config to only detected devices
+static void prune_pca9685_config_to_detected(const std::vector<uint8_t>& detected) {
+    std::unordered_set<std::string> keep;
+    for (uint8_t a : detected) {
+        char k[6]; std::snprintf(k, sizeof(k), "0x%02X", a);
+        keep.insert(k);
+    }
+
+    std::string cfg_text = HSG::API::get_config_json();
+    cJSON* config = cJSON_Parse(cfg_text.c_str());
+    if (!config) config = cJSON_CreateObject();
+
+    cJSON* i2c = cJSON_GetObjectItem(config, "i2c");
+    if (!cJSON_IsObject(i2c)) {
+        i2c = cJSON_CreateObject();
+        cJSON_AddItemToObject(config, "i2c", i2c);
+    }
+    cJSON* pca = cJSON_GetObjectItem(i2c, "pca9685");
+    if (!cJSON_IsObject(pca)) {
+        pca = cJSON_CreateObject();
+        cJSON_AddItemToObject(i2c, "pca9685", pca);
+    }
+
+    for (cJSON* child = pca->child; child; ) {
+        cJSON* next = child->next;
+        if (!keep.count(child->string)) {
+            ESP_LOGW(TAG, "Removing PCA9685 at %s (not detected)", child->string);
+            cJSON_DeleteItemFromObject(pca, child->string);
+        }
+        child = next;
+    }
+
+    for (auto& k : keep) {
+        if (!cJSON_GetObjectItem(pca, k.c_str())) {
+            cJSON* arr = cJSON_CreateArray();
+            for (int i = 0; i < 16; ++i) cJSON_AddItemToArray(arr, cJSON_CreateNumber(0));
+            cJSON_AddItemToObject(pca, k.c_str(), arr);
+            ESP_LOGI(TAG, "Added default map for PCA9685 at %s", k.c_str());
+        }
+    }
+
+    char* out = cJSON_PrintUnformatted(config);
+    HSG::API::set_config_json(out ? out : "{}");
+    if (out) free(out);
+    cJSON_Delete(config);
 }
 
 // --- Helper function to get a human-readable uptime string ---
@@ -279,6 +450,17 @@ static esp_err_t h_adopt(httpd_req_t* req) {
         cJSON_Delete(cfg_root);
     }
     cJSON_AddStringToObject(sys, "timezone", tz_str.c_str());
+    if (g_init.get_temperature_cb) {
+        float temp_c = 0.f;
+        if (g_init.get_temperature_cb(&temp_c)) {
+            cJSON_AddBoolToObject(sys, "temperatureAvailable", true);
+            cJSON_AddNumberToObject(sys, "temperatureC", (double)temp_c);
+            cJSON_AddStringToObject(sys, "temperatureSensor", "MCP9808");
+        } else {
+            cJSON_AddBoolToObject(sys, "temperatureAvailable", false);
+            cJSON_AddStringToObject(sys, "temperatureSensor", "MCP9808");
+        }
+    }
     cJSON_AddItemToObject(root, "system", sys);
 
     return send_json(req, root);
@@ -385,6 +567,35 @@ static esp_err_t h_mqtt_post(httpd_req_t* req) {
     return httpd_resp_sendstr(req, "OK");
 }*/
 
+static void send_command_feedback(httpd_req_t* req, const HSG::API::CommandFeedback& fb) {
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "status", fb.ok ? "success" : "error");
+    cJSON_AddBoolToObject(root, "ok", fb.ok ? 1 : 0);
+    cJSON_AddStringToObject(root, "target_type", fb.target_type.c_str());
+    if (!fb.state.empty()) cJSON_AddStringToObject(root, "state", fb.state.c_str());
+    cJSON_AddNumberToObject(root, "brightness_pct", fb.brightness_pct);
+    cJSON_AddNumberToObject(root, "pwm", fb.pwm);
+    cJSON_AddNumberToObject(root, "fade_ms", fb.fade_ms);
+    cJSON_AddBoolToObject(root, "mapping_found", fb.mapping_found ? 1 : 0);
+    cJSON_AddNumberToObject(root, "mapped_outputs_total", fb.mapped_outputs_total);
+    cJSON_AddBoolToObject(root, "i2c_written", fb.i2c_written ? 1 : 0);
+    cJSON_AddBoolToObject(root, "deferred_fade", fb.deferred_fade ? 1 : 0);
+    cJSON_AddNumberToObject(root, "outputs_affected", fb.outputs_affected);
+    if (fb.target_type == "output")
+        cJSON_AddNumberToObject(root, "output", fb.output);
+    if (!fb.group.empty())
+        cJSON_AddStringToObject(root, "group", fb.group.c_str());
+    if (fb.pca_addr >= 0)
+        cJSON_AddNumberToObject(root, "pca_addr", fb.pca_addr);
+    if (fb.pca_channel >= 0)
+        cJSON_AddNumberToObject(root, "pca_channel", fb.pca_channel);
+    if (!fb.i2c_error.empty())
+        cJSON_AddStringToObject(root, "i2c_error", fb.i2c_error.c_str());
+    if (!fb.message.empty())
+        cJSON_AddStringToObject(root, "message", fb.message.c_str());
+    send_json(req, root);
+}
+
 // POST /api/command
 static esp_err_t h_command(httpd_req_t* req) {
     auto body = req_read_all(req);
@@ -423,13 +634,32 @@ static esp_err_t h_command(httpd_req_t* req) {
     }
     
     if (auto* out = cJSON_GetObjectItem(cmd, "output"); cJSON_IsNumber(out)) {
-        if (g_init.output_cb) g_init.output_cb(out->valueint, brightness, fade, state_str);
-    } else if (auto* grp = cJSON_GetObjectItem(cmd, "group"); cJSON_IsString(grp)) {
-        if (g_init.group_cb) g_init.group_cb(grp->valuestring, brightness, fade, state_str);
+        HSG::API::CommandFeedback fb;
+        if (g_init.output_cb)
+            fb = g_init.output_cb(out->valueint, brightness, fade, state_str);
+        else {
+            fb.ok = false;
+            fb.message = "output_cb not configured";
+        }
+        cJSON_Delete(cmd);
+        send_command_feedback(req, fb);
+        return ESP_OK;
+    }
+    if (auto* grp = cJSON_GetObjectItem(cmd, "group"); cJSON_IsString(grp)) {
+        HSG::API::CommandFeedback fb;
+        if (g_init.group_cb)
+            fb = g_init.group_cb(grp->valuestring, brightness, fade, state_str);
+        else {
+            fb.ok = false;
+            fb.message = "group_cb not configured";
+        }
+        cJSON_Delete(cmd);
+        send_command_feedback(req, fb);
+        return ESP_OK;
     }
 
     cJSON_Delete(cmd);
-    return httpd_resp_sendstr(req, "OK");
+    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "output or group required");
 }
 
 // POST /api/node/config - send hub->node config (set node ID, find-me, etc.)
@@ -489,14 +719,6 @@ static esp_err_t h_node_config_post(httpd_req_t* req) {
             cJSON_Delete(root);
             return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "output_index required");
         }
-    } else if (strcmp(cmd_str, "set_can_link_indicator") == 0) {
-        cmd_byte = CMD_SET_CAN_LINK_INDICATOR;
-        int gpio = 255;
-        if (auto* v = cJSON_GetObjectItem(root, "can_link_indicator_gpio"); cJSON_IsNumber(v))
-            gpio = v->valueint;
-        if (gpio < 0 || (gpio > 48 && gpio != 255)) gpio = 255;
-        payload[0] = (uint8_t)(gpio & 0xFF);
-        plen = 1;
     } else if (strcmp(cmd_str, "set_input_count") == 0) {
         cmd_byte = CMD_SET_INPUT_COUNT;
         if (auto* v = cJSON_GetObjectItem(root, "count"); cJSON_IsNumber(v) && v->valueint >= 1 && v->valueint <= 6) {
@@ -777,28 +999,80 @@ static esp_err_t h_ota(httpd_req_t* req) {
 }
 
 static esp_err_t h_i2c_scan(httpd_req_t *req) {
-    ESP_LOGI("API", "Received request to scan I2C devices.");
+    ESP_LOGI("API", "Received request to scan I2C devices (probe only).");
 
-    HSG::API::scan_and_prune_i2c(I2C_MASTER_NUM);
+    auto detected = scan_pca9685_addrs(I2C_MASTER_NUM);
+    auto configured = get_configured_pca9685_addrs();
+    auto rtc_addrs = scan_rtc_addrs();
+    auto mcp9808_addrs = scan_mcp9808_addrs();
+    std::vector<uint8_t> other_devices = rtc_addrs;
+    other_devices.insert(other_devices.end(), mcp9808_addrs.begin(), mcp9808_addrs.end());
+    std::vector<uint8_t> to_remove, to_add;
+    diff_pca_addrs(detected, configured, to_remove, to_add);
 
-    std::vector<uint8_t> rtc_addrs = scan_rtc_addrs();
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "status", "success");
-    cJSON_AddStringToObject(root, "message", "I2C scan and configuration prune complete.");
-    cJSON* other = cJSON_CreateArray();
-    for (uint8_t a : rtc_addrs)
-        cJSON_AddItemToArray(other, cJSON_CreateNumber(a));
-    cJSON_AddItemToObject(root, "other_devices", other);
-    char* resp_str = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!resp_str) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+    const char* scan_message = (!to_remove.empty() || !to_add.empty())
+        ? "I2C scan complete. Addresses differ — use Apply to update saved mappings."
+        : "I2C scan complete. Configuration matches detected devices.";
+    cJSON_AddStringToObject(root, "message", scan_message);
+    add_addr_array_json(root, "pca9685", detected);
+    add_addr_array_json(root, "configured_pca9685", configured);
+    add_addr_array_json(root, "to_remove", to_remove);
+    add_addr_array_json(root, "to_add", to_add);
+    add_addr_array_json(root, "other_devices", other_devices);
+    cJSON_AddBoolToObject(root, "config_changed", cJSON_False);
+
+    cJSON_AddNumberToObject(root, "mapped_outputs", (int)hsg_outputs_get_mapped_count());
+
+    ESP_LOGI("API", "I2C scan complete: %d PCA9685, %d mapped outputs",
+             (int)detected.size(), hsg_outputs_get_mapped_count());
+    return send_json(req, root);
+}
+
+static esp_err_t h_i2c_apply(httpd_req_t *req) {
+    ESP_LOGI("API", "Received request to apply I2C scan results to configuration.");
+
+    auto body = req_read_all(req);
+    cJSON* root = cJSON_Parse(body.c_str());
+    if (!root) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+
+    std::vector<uint8_t> addrs;
+    cJSON* arr = cJSON_GetObjectItem(root, "pca9685");
+    if (cJSON_IsArray(arr)) {
+        cJSON* item = nullptr;
+        cJSON_ArrayForEach(item, arr) {
+            if (cJSON_IsNumber(item) && item->valueint >= 0 && item->valueint <= 127)
+                addrs.push_back((uint8_t)item->valueint);
+        }
     }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, resp_str, strlen(resp_str));
-    free(resp_str);
-    return ESP_OK;
+    cJSON_Delete(root);
+
+    auto configured = get_configured_pca9685_addrs();
+    if (addrs.empty() && !configured.empty()) {
+        ESP_LOGW("API", "Refusing I2C apply: scan found no PCA9685 but %d board(s) configured",
+                 (int)configured.size());
+        cJSON* resp = cJSON_CreateObject();
+        cJSON_AddStringToObject(resp, "status", "error");
+        cJSON_AddStringToObject(resp, "message",
+            "Scan found no PCA9685 boards — configuration unchanged to protect your mappings. "
+            "Fix I2C/power, scan again, then apply.");
+        cJSON_AddBoolToObject(resp, "config_changed", cJSON_False);
+        add_addr_array_json(resp, "configured_pca9685", configured);
+        return send_json(req, resp);
+    }
+
+    prune_pca9685_config_to_detected(addrs);
+
+    if (g_init.i2c_config_applied_cb)
+        g_init.i2c_config_applied_cb(addrs);
+
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "success");
+    cJSON_AddStringToObject(resp, "message", "I2C configuration updated from scan results.");
+    cJSON_AddBoolToObject(resp, "config_changed", cJSON_True);
+    add_addr_array_json(resp, "pca9685", addrs);
+    return send_json(req, resp);
 }
 
 EventGroupHandle_t g_event_group = nullptr;
@@ -903,6 +1177,7 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     httpd_uri_t config_page = { .uri="/config", .method=HTTP_GET, .handler=h_config_page, .user_ctx=nullptr };
     httpd_uri_t state_get = { .uri="/api/state", .method=HTTP_GET, .handler=h_state_get, .user_ctx=nullptr };
     httpd_uri_t i2c_scan_uri = { .uri="/api/i2c/scan", .method=HTTP_POST, .handler=h_i2c_scan, .user_ctx=nullptr };
+    httpd_uri_t i2c_apply_uri = { .uri="/api/i2c/apply", .method=HTTP_POST, .handler=h_i2c_apply, .user_ctx=nullptr };
     httpd_uri_t can_history = { .uri="/api/can/history", .method=HTTP_GET, .handler=h_can_history, .user_ctx=nullptr };
     httpd_uri_t nodes_get = { .uri="/api/nodes", .method=HTTP_GET, .handler=h_nodes_get, .user_ctx=nullptr };
     httpd_uri_t node_config_post = { .uri="/api/node/config", .method=HTTP_POST, .handler=h_node_config_post, .user_ctx=nullptr };
@@ -912,6 +1187,7 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &can_history));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &nodes_get));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &i2c_scan_uri));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &i2c_apply_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &state_get));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &config_page));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &favicon_get));
@@ -936,57 +1212,6 @@ esp_err_t register_uris(httpd_handle_t server, const Init& init) {
     return ESP_OK;
 }
 
-// prune PCA9685 config to only detected devices
-static void prune_pca9685_config_to_detected(const std::vector<uint8_t>& detected) {
-    std::unordered_set<std::string> keep;
-    for (uint8_t a : detected) {
-        char k[6]; std::snprintf(k, sizeof(k), "0x%02X", a);
-        keep.insert(k);
-    }
-
-    // Work with CONFIG object only
-    std::string cfg_text = HSG::API::get_config_json();
-    cJSON* config = cJSON_Parse(cfg_text.c_str());
-    if (!config) config = cJSON_CreateObject();
-
-    // ensure i2c.pca9685 object
-    cJSON* i2c = cJSON_GetObjectItem(config, "i2c");
-    if (!cJSON_IsObject(i2c)) {
-        i2c = cJSON_CreateObject();
-        cJSON_AddItemToObject(config, "i2c", i2c);
-    }
-    cJSON* pca = cJSON_GetObjectItem(i2c, "pca9685");
-    if (!cJSON_IsObject(pca)) {
-        pca = cJSON_CreateObject();
-        cJSON_AddItemToObject(i2c, "pca9685", pca);
-    }
-
-    // prune
-    for (cJSON* child = pca->child; child; ) {
-        cJSON* next = child->next;
-        if (!keep.count(child->string)) {
-            ESP_LOGW(TAG, "Removing PCA9685 at %s (not detected)", child->string);
-            cJSON_DeleteItemFromObject(pca, child->string);
-        }
-        child = next;
-    }
-
-    // add defaults for newly detected
-    for (auto& k : keep) {
-        if (!cJSON_GetObjectItem(pca, k.c_str())) {
-            cJSON* arr = cJSON_CreateArray();
-            for (int i = 0; i < 16; ++i) cJSON_AddItemToArray(arr, cJSON_CreateNumber(0));
-            cJSON_AddItemToObject(pca, k.c_str(), arr);
-            ESP_LOGI(TAG, "Added default map for PCA9685 at %s", k.c_str());
-        }
-    }
-
-    char* out = cJSON_PrintUnformatted(config);
-    HSG::API::set_config_json(out ? out : "{}"); // replaces the CONFIG object atomically
-    if (out) free(out);
-    cJSON_Delete(config);
-}
-
 EventGroupHandle_t get_event_group() {
     return g_event_group;
 }
@@ -1007,7 +1232,7 @@ esp_err_t start(const Init& cfg) {
     ESP_LOGI(TAG, "Configuration loaded, signaling event group.");
 
     httpd_config_t conf = HTTPD_DEFAULT_CONFIG();
-    conf.max_uri_handlers = 20;   // more routes
+    conf.max_uri_handlers = 21;
     conf.lru_purge_enable = true;
     conf.server_port = 80;
     conf.recv_wait_timeout = 300;
@@ -1089,12 +1314,37 @@ esp_err_t set_config_json(const char* text) {
 esp_err_t scan_and_prune_i2c(int i2c_port) {
     auto found = scan_pca9685_addrs((i2c_port_t)i2c_port);
     if (found.empty()) {
-        ESP_LOGW(TAG, "No PCA9685 detected on I2C bus");
-    } else {
-//        ESP_LOGI(TAG, "Detected %d PCA9685 device(s)", (int)found.size());
+        ESP_LOGW(TAG, "No PCA9685 detected on I2C bus — config not pruned");
+        return ESP_OK;
     }
     prune_pca9685_config_to_detected(found);
     return ESP_OK;
+}
+
+esp_err_t restore_rack32_pca_if_needed(int i2c_port)
+{
+#if defined(BOARD_RACK32)
+    (void)i2c_port;
+    cJSON* full = load_cfg_json();
+    ensure_layout(full);
+    cJSON* config = cJSON_GetObjectItem(full, "config");
+    cJSON* i2c = cJSON_GetObjectItem(config, "i2c");
+    cJSON* pca = cJSON_GetObjectItem(i2c, "pca9685");
+
+    if (pca_config_has_output_mappings(pca)) {
+        cJSON_Delete(full);
+        return ESP_OK;
+    }
+
+    ESP_LOGW(TAG, "PCA output mappings empty — restoring Rack32 defaults (0x40/0x41/0x42)");
+    seed_rack32_pca_defaults(pca);
+    esp_err_t err = save_cfg_json(full);
+    cJSON_Delete(full);
+    return err;
+#else
+    (void)i2c_port;
+    return ESP_OK;
+#endif
 }
 
 std::string get_mqtt_json() {

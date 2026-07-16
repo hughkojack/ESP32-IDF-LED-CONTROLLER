@@ -3,7 +3,7 @@
 
 // --- Select your board ---
 // Uncomment the board you are compiling for
-//#define BOARD_RACK32
+#define BOARD_RACK32
 //#define BOARD_OLIMEX_POE
 
 

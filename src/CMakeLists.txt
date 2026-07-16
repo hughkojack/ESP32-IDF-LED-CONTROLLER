@@ -1,6 +1,6 @@
 
-option(BOARD_OLIMEX_POE "Build for Olimex ESP32-POE board" ON)
-option(BOARD_RACK32 "Build for Rack32 board with W5500" OFF)
+option(BOARD_OLIMEX_POE "Build for Olimex ESP32-POE board" OFF)
+option(BOARD_RACK32 "Build for Rack32 board with W5500" ON)
 
 message(STATUS "Board configuration: RACK32=${BOARD_RACK32}, OLIMEX_POE=${BOARD_OLIMEX_POE}")
 
@@ -25,6 +25,7 @@ idf_component_register(
         hsg_api
         hsg_outputs
         ds3231
+        mcp9808
         esp32-mcp2515
         mqtt
         driver

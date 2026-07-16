@@ -21,6 +21,15 @@ extern "C" {
 #define DS3231_I2C_ADDR_ALT 0x69U
 
 /**
+ * Mark whether a DS3231 was detected at boot. When false, get/set/status are no-ops.
+ */
+void ds3231_mark_installed(bool installed);
+bool ds3231_is_installed(void);
+
+/** Cached 7-bit I2C address after successful probe (0x68 or 0x69); 0 if not installed. */
+uint8_t ds3231_get_i2c_addr(void);
+
+/**
  * Probe for DS3231 on the bus (tries 0x68 then 0x69).
  * @param bus I2C master bus handle (already initialized)
  * @return true if device ACKs at 0x68 or 0x69

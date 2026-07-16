@@ -179,6 +179,7 @@
                             <option value="Australia/Sydney">Australia/Sydney</option>
                         </select></p>
                         <p><strong>Hub time:</strong> <span id="sysHubTime">-</span> &nbsp;|&nbsp; <strong>RTC time:</strong> <span id="sysRtcTime">-</span></p>
+                        <p><strong>Board temperature:</strong> <span id="sysTemperature">-</span></p>
                         <p class="text-gray-400 text-xs mt-1">When the hub has internet (NTP), use the button below to write the current time to the RTC. The RTC keeps time across reboot only if the DS3231 module has a backup battery (CR2032) installed.</p>
                         <button type="button" id="syncRtcBtn" class="mt-2 text-sm bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-1.5 px-3 rounded-md transition duration-300">Sync RTC from system time</button>
                         <p><strong>WebSocket Connected:</strong> <span id="sysWsConnected">-</span></p>
@@ -383,14 +384,6 @@
                                     <button id="findMeFromModalBtn" class="bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold py-2 px-4 rounded-md transition duration-300">Find Me</button>
                                 </div>
                             </div>
-                            <div id="nodeCanLinkIndicatorWrap" class="border-t border-gray-600 pt-4 mt-4 hidden">
-                                <h4 class="text-sm font-medium text-gray-300 mb-2">CAN link indicator GPIO (mechanical)</h4>
-                                <p class="text-xs text-gray-400 mb-2">GPIO 0–48 to indicate CAN link: solid = good link, flashing = bad/no link. Leave empty or 255 to disable.</p>
-                                <div class="flex items-center gap-2">
-                                    <input type="number" id="nodeCanLinkIndicatorInput" min="0" max="48" placeholder="GPIO or empty" class="bg-gray-600 text-white rounded px-3 py-2 border border-gray-500 w-24" title="0-48 or leave empty to disable">
-                                    <button id="setCanLinkIndicatorBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-md transition duration-300">Set</button>
-                                </div>
-                            </div>
                             <div class="border-t border-gray-600 pt-4 mt-4">
                                 <h4 class="text-sm font-medium text-gray-300 mb-2">Switch type per input</h4>
                                 <p class="text-xs text-gray-400 mb-2">Set each input to momentary (button) or toggle (rocker/maintained).</p>
@@ -587,6 +580,8 @@
                             <span id="sendCommandBtnText">Send Command</span>
                             <div id="sendCommandSpinner" class="spinner hidden ml-2"></div>
                         </button>
+                        <div id="commandFeedback" class="mt-4 rounded-md border border-gray-600 bg-gray-900 p-4 text-sm font-mono whitespace-pre-wrap hidden"></div>
+                        <div id="commandFeedbackLog" class="mt-2 max-h-48 overflow-y-auto rounded-md border border-gray-700 bg-gray-950 p-3 text-xs font-mono text-gray-400 space-y-2"></div>
                     </div>
                 </div>   
                 <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
@@ -635,14 +630,17 @@
                     <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">I2C Scan</h2>
                     <div class="space-y-4">
                         <div>
-                            <label for="otaFile" class="block text-sm font-medium text-gray-300">If you have added or removed PCA9685 extender boards, click this button to re-scan the I2C bus.
-                            This will update the output mappings and remove any devices that are no longer detected.</label>
+                            <p class="text-sm text-gray-300">Scan the I2C bus for PCA9685 boards and other devices. Results are shown below; your saved mappings are not changed until you confirm.</p>
                         </div>
                         <button id="scanI2cButton" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center">
                             <span id="scanI2cBtnText">Scan for I2C Devices</span>
                             <div id="scanI2cSpinner" class="spinner hidden ml-2"></div>
                         </button>
-                        <p id="scanStatus" style="margin-top: 10px;"></p>
+                        <button id="applyI2cButton" class="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 px-6 rounded-md transition duration-300 flex items-center justify-center hidden">
+                            <span id="applyI2cBtnText">Apply Scan Results to Configuration</span>
+                            <div id="applyI2cSpinner" class="spinner hidden ml-2"></div>
+                        </button>
+                        <p id="scanStatus" class="text-sm text-gray-300 whitespace-pre-wrap" style="margin-top: 10px;"></p>
                     </div>
                 </div>
                 
@@ -700,6 +698,8 @@
             const sendCommandBtn = document.getElementById('sendCommandBtn');
             const sendCommandBtnText = document.getElementById('sendCommandBtnText');
             const sendCommandSpinner = document.getElementById('sendCommandSpinner');
+            const commandFeedback = document.getElementById('commandFeedback');
+            const commandFeedbackLog = document.getElementById('commandFeedbackLog');
             
             const refreshButton = document.getElementById('refreshCanBtn');
             const refreshCanBtnText = document.getElementById('refreshCanBtnText');
@@ -714,7 +714,11 @@
             const scanI2cBtnText = document.getElementById('scanI2cBtnText');
             const scanI2cSpinner = document.getElementById('scanI2cSpinner');
             const scanI2cButton = document.getElementById('scanI2cButton');
+            const applyI2cButton = document.getElementById('applyI2cButton');
+            const applyI2cBtnText = document.getElementById('applyI2cBtnText');
+            const applyI2cSpinner = document.getElementById('applyI2cSpinner');
             const statusEl = document.getElementById('scanStatus');
+            let lastI2cScanResult = null;
 
             const restartBtn = document.getElementById('restartBtn');
             const restartBtnText = document.getElementById('restartBtnText');
@@ -747,9 +751,6 @@
             const nodeFindMeOutputInput = document.getElementById('nodeFindMeOutputInput');
             const nodeFindMeDurationInput = document.getElementById('nodeFindMeDurationInput');
             const findMeFromModalBtn = document.getElementById('findMeFromModalBtn');
-            const nodeCanLinkIndicatorWrap = document.getElementById('nodeCanLinkIndicatorWrap');
-            const nodeCanLinkIndicatorInput = document.getElementById('nodeCanLinkIndicatorInput');
-            const setCanLinkIndicatorBtn = document.getElementById('setCanLinkIndicatorBtn');
                         const nodeNightLightEnabled = document.getElementById('nodeNightLightEnabled');
             const nodeNightLightBrightness = document.getElementById('nodeNightLightBrightness');
             const nodeNightLightBrightnessVal = document.getElementById('nodeNightLightBrightnessVal');
@@ -797,6 +798,7 @@
 
             uploadFwBtn.addEventListener('click', uploadFirmware);
             scanI2cButton.addEventListener('click', scanI2cDevices);
+            applyI2cButton.addEventListener('click', applyI2cScanResults);
             restartBtn.addEventListener('click', restartDevice);
             const syncRtcBtn = document.getElementById('syncRtcBtn');
             if (syncRtcBtn) {
@@ -850,7 +852,6 @@
             if (applyInputTypesBtn) applyInputTypesBtn.addEventListener('click', applyInputTypes);
             if (setInputCountBtn) setInputCountBtn.addEventListener('click', setInputCount);
             if (findMeFromModalBtn) findMeFromModalBtn.addEventListener('click', sendFindMeFromModal);
-            if (setCanLinkIndicatorBtn) setCanLinkIndicatorBtn.addEventListener('click', sendCanLinkIndicatorFromModal);
             if (nodeNightLightBrightness) {
                 nodeNightLightBrightness.addEventListener('input', () => {
                     if (nodeNightLightBrightnessVal)
@@ -1002,6 +1003,20 @@
                 }
                 sysLastResetReason.textContent = data.system?.lastResetReason || '-';
                 sysWsConnected.textContent = data.system?.wsConnected ? 'Yes' : 'No';
+                const sysTemperatureEl = document.getElementById('sysTemperature');
+                if (sysTemperatureEl) {
+                    if (data.system?.temperatureAvailable && typeof data.system.temperatureC === 'number') {
+                        const sensor = data.system.temperatureSensor || 'MCP9808';
+                        sysTemperatureEl.textContent = data.system.temperatureC.toFixed(1) + ' °C (' + sensor + ')';
+                        sysTemperatureEl.classList.remove('text-gray-400');
+                    } else if (data.system?.temperatureSensor) {
+                        sysTemperatureEl.textContent = 'Not detected (' + data.system.temperatureSensor + ')';
+                        sysTemperatureEl.classList.add('text-gray-400');
+                    } else {
+                        sysTemperatureEl.textContent = '-';
+                        sysTemperatureEl.classList.add('text-gray-400');
+                    }
+                }
 
                 // Get the labels from the config
                 const labels = data.config.labels || {};
@@ -1015,8 +1030,13 @@
                 // Check if there is a saved i2c configuration
                 if (data.config && data.config.i2c && data.config.i2c.pca9685 && Object.keys(data.config.i2c.pca9685).length > 0) {
                     
-                    // Loop through each saved device in the configuration
-                    for (const [hexAddr, mappings] of Object.entries(data.config.i2c.pca9685)) {
+                    const pcaEntries = Object.entries(data.config.i2c.pca9685).sort((a, b) => {
+                        const addrA = parseInt(a[0].substring(2), 16);
+                        const addrB = parseInt(b[0].substring(2), 16);
+                        return addrA - addrB;
+                    });
+
+                    for (const [hexAddr, mappings] of pcaEntries) {
                         const addr = parseInt(hexAddr.substring(2), 16);
                         
                         // 1. Create the UI container for this device
@@ -1653,17 +1673,6 @@
                     if (nodeFindMeHelpText) {
                         nodeFindMeHelpText.textContent = 'ESP32-S3 chip I/O (GPIO) index 0–48 to blink for Find Me.';
                     }
-                    if (nodeCanLinkIndicatorWrap) {
-                        if (isMechanicalNode) {
-                            nodeCanLinkIndicatorWrap.classList.remove('hidden');
-                            if (nodeCanLinkIndicatorInput) {
-                                const v = node.can_link_indicator_gpio;
-                                nodeCanLinkIndicatorInput.value = (v !== undefined && v !== 0xFF && v >= 0 && v <= 48) ? String(v) : '';
-                            }
-                        } else {
-                            nodeCanLinkIndicatorWrap.classList.add('hidden');
-                        }
-                    }
                     if (inputCount === 0) {
                         nodeInputTypesContainer.innerHTML = '<p class="text-xs text-gray-400">Set number of inputs above (1–6), then configure switch types below.</p>';
                         if (applyInputTypesBtn) applyInputTypesBtn.classList.add('hidden');
@@ -1871,40 +1880,6 @@
                     alert('Error: ' + error.message);
                     setNightLightBtn.textContent = origText;
                     setNightLightBtn.disabled = false;
-                }
-            }
-
-            async function sendCanLinkIndicatorFromModal() {
-                if (currentConfiguringNodeId === null) return;
-                if (!nodeCanLinkIndicatorInput || !setCanLinkIndicatorBtn) return;
-                const raw = nodeCanLinkIndicatorInput.value.trim();
-                let gpio = 255;
-                if (raw !== '') {
-                    const n = parseInt(raw, 10);
-                    if (!isNaN(n) && n >= 0 && n <= 48) gpio = n;
-                }
-                const origText = setCanLinkIndicatorBtn.textContent;
-                setCanLinkIndicatorBtn.textContent = 'Sending...';
-                setCanLinkIndicatorBtn.disabled = true;
-                try {
-                    const response = await fetch('/api/node/config', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            target_node_id: currentConfiguringNodeId,
-                            command: 'set_can_link_indicator',
-                            can_link_indicator_gpio: gpio
-                        })
-                    });
-                    if (!response.ok) throw new Error(await response.text());
-                    setCanLinkIndicatorBtn.textContent = 'Saved';
-                    setTimeout(() => { setCanLinkIndicatorBtn.textContent = origText; setCanLinkIndicatorBtn.disabled = false; }, 1500);
-                    loadNodeInputTypes(currentConfiguringNodeId);
-                } catch (error) {
-                    console.error('Set CAN link indicator:', error);
-                    alert('Error: ' + error.message);
-                    setCanLinkIndicatorBtn.textContent = origText;
-                    setCanLinkIndicatorBtn.disabled = false;
                 }
             }
 
@@ -2283,10 +2258,14 @@
                 }
             }
 
+            function formatPcaConfigAddr(addrNum) {
+                return '0x' + Number(addrNum).toString(16).toUpperCase().padStart(2, '0');
+            }
+
             function getI2cMappingFromUi() {
                 const i2cConfig = { pca9685: {} };
                 i2cMapping.querySelectorAll('input[type="number"]').forEach(input => {
-                    const addr = `0x${parseInt(input.dataset.addr).toString(16)}`;
+                    const addr = formatPcaConfigAddr(parseInt(input.dataset.addr, 10));
                     const port = parseInt(input.dataset.port);
                     const value = parseInt(input.value) || 0;
                     if (!i2cConfig.pca9685[addr]) i2cConfig.pca9685[addr] = new Array(16).fill(0);
@@ -2345,6 +2324,70 @@
                 return labels;
             }
 
+            function formatPcaAddr(addr) {
+                if (addr == null || addr < 0) return '—';
+                return '0x' + Number(addr).toString(16).toUpperCase().padStart(2, '0');
+            }
+
+            function formatCommandFeedback(data) {
+                const lines = [];
+                const ts = new Date().toLocaleTimeString();
+                lines.push('[' + ts + '] ' + (data.ok ? 'OK' : 'FAILED') + ': ' + (data.message || ''));
+                if (data.target_type === 'output') {
+                    lines.push('Output: ' + data.output + '  State: ' + (data.state || '—') +
+                        '  Brightness: ' + (data.brightness_pct ?? '—') + '%  PWM: ' + (data.pwm ?? '—'));
+                } else if (data.target_type === 'group') {
+                    lines.push('Group: ' + (data.group || '—') + '  State: ' + (data.state || '—') +
+                        '  Brightness: ' + (data.brightness_pct ?? '—') + '%  Outputs: ' + (data.outputs_affected ?? 0));
+                }
+                lines.push('Mappings loaded (hub): ' + (data.mapped_outputs_total ?? '—'));
+                if (data.target_type === 'output') {
+                    if (data.mapping_found) {
+                        lines.push('PCA map: ' + formatPcaAddr(data.pca_addr) + ' channel ' + (data.pca_channel ?? '—'));
+                    } else {
+                        lines.push('PCA map: NOT FOUND for this output');
+                    }
+                }
+                if (data.deferred_fade) {
+                    lines.push('I2C: deferred (fade ' + (data.fade_ms || 0) + 'ms)');
+                } else if (data.i2c_written) {
+                    lines.push('I2C: PWM write succeeded');
+                } else if (data.i2c_error) {
+                    lines.push('I2C error: ' + data.i2c_error);
+                } else if (data.fade_ms > 0) {
+                    lines.push('I2C: pending fade');
+                } else if (data.target_type === 'output' && data.mapping_found) {
+                    lines.push('I2C: write not confirmed');
+                }
+                return lines.join('\n');
+            }
+
+            function showCommandFeedback(data, sentPayload) {
+                if (!commandFeedback) return;
+                const text = formatCommandFeedback(data);
+                commandFeedback.textContent = text;
+                commandFeedback.classList.remove('hidden', 'border-green-600', 'border-red-500', 'border-yellow-500', 'text-green-300', 'text-red-300', 'text-yellow-300');
+                if (data.ok) {
+                    commandFeedback.classList.add('border-green-600', 'text-green-300');
+                } else if (data.deferred_fade) {
+                    commandFeedback.classList.add('border-yellow-500', 'text-yellow-300');
+                } else {
+                    commandFeedback.classList.add('border-red-500', 'text-red-300');
+                }
+
+                if (commandFeedbackLog) {
+                    const entry = document.createElement('div');
+                    entry.className = data.ok ? 'text-green-400' : 'text-red-400';
+                    const summary = (sentPayload.output != null ? 'OUT ' + sentPayload.output : 'GRP ' + sentPayload.group) +
+                        ' ' + (sentPayload.state || '') + ' → ' + (data.message || (data.ok ? 'OK' : 'FAIL'));
+                    entry.textContent = '[' + new Date().toLocaleTimeString() + '] ' + summary;
+                    entry.title = text;
+                    commandFeedbackLog.prepend(entry);
+                    while (commandFeedbackLog.children.length > 12)
+                        commandFeedbackLog.removeChild(commandFeedbackLog.lastChild);
+                }
+            }
+
             async function sendCommand() {
                 const targetVal = commandTargetSelect && commandTargetSelect.value ? commandTargetSelect.value.trim() : '';
                 if (!targetVal) return showStatus('Please select a target (Output or Group).', 'error');
@@ -2368,18 +2411,32 @@
                 if (fadeValue) command.fade = parseInt(fadeValue, 10);
 
                 setLoadingState(sendCommandBtn, sendCommandBtnText, sendCommandSpinner, true);
-                showStatus(`Sending command...`, 'loading');
+                showStatus('Sending command...', 'loading');
                 try {
-                    const response = await fetch(`/api/command`, {
+                    const response = await fetch('/api/command', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(command)
                     });
-                    if (!response.ok) throw new Error(`HTTP error!`);
-                    showStatus(`Command sent successfully.`, 'success');
+                    const raw = await response.text();
+                    let data = null;
+                    try { data = JSON.parse(raw); } catch (e) { /* legacy OK text */ }
+                    if (!response.ok) {
+                        const errMsg = (data && data.message) ? data.message : (raw || 'HTTP ' + response.status);
+                        showCommandFeedback({ ok: false, message: errMsg, target_type: command.output ? 'output' : 'group' }, command);
+                        throw new Error(errMsg);
+                    }
+                    if (data && typeof data.ok !== 'undefined') {
+                        showCommandFeedback(data, command);
+                        showStatus(data.message || (data.ok ? 'Command OK' : 'Command failed'), data.ok ? 'success' : 'error');
+                    } else {
+                        showCommandFeedback({ ok: true, message: raw || 'OK (legacy response)', target_type: command.output ? 'output' : 'group' }, command);
+                        showStatus('Command sent (legacy OK). Flash new firmware for detailed feedback.', 'success');
+                    }
                 } catch (error) {
                     console.error('Command error:', error);
-                    showStatus('Failed to send command.', 'error');
+                    if (!commandFeedback || commandFeedback.classList.contains('hidden'))
+                        showStatus('Failed to send command: ' + error.message, 'error');
                 } finally {
                     setLoadingState(sendCommandBtn, sendCommandBtnText, sendCommandSpinner, false);
                 }
@@ -2474,33 +2531,86 @@
                 }
             }
 
+            function formatI2cAddr(addr) {
+                return '0x' + Number(addr).toString(16).toUpperCase().padStart(2, '0');
+            }
+
+            function formatI2cAddrList(addrs) {
+                if (!addrs || addrs.length === 0) return '(none)';
+                return addrs.map(formatI2cAddr).join(', ');
+            }
+
+            function buildI2cScanSummary(data) {
+                const lines = [];
+                lines.push('Discovered PCA9685: ' + formatI2cAddrList(data.pca9685));
+                lines.push('Currently configured: ' + formatI2cAddrList(data.configured_pca9685));
+                if (typeof data.mapped_outputs === 'number') {
+                    lines.push('Output mappings loaded: ' + data.mapped_outputs);
+                }
+                if (data.pca_init_message) {
+                    lines.push('Driver: ' + data.pca_init_message);
+                } else if (typeof data.chips_initialized === 'number') {
+                    lines.push('PCA drivers initialized: ' + data.chips_initialized +
+                        (data.chips_failed ? ' (' + data.chips_failed + ' failed)' : ''));
+                }
+                if (data.other_devices && data.other_devices.length > 0) {
+                    lines.push('Other I2C devices: ' + formatI2cAddrList(data.other_devices));
+                }
+                const willRemove = data.to_remove || [];
+                const willAdd = data.to_add || [];
+                if (willRemove.length === 0 && willAdd.length === 0) {
+                    lines.push('');
+                    if ((data.pca9685 || []).length === 0 && (data.configured_pca9685 || []).length > 0) {
+                        lines.push('WARNING: Scan found no PCA9685 — your saved mappings were NOT changed.');
+                        lines.push('Check PCA power/I2C wiring, then scan again.');
+                    } else if (data.mapped_outputs === 0) {
+                        lines.push('No output mappings — assign outputs in the Outputs tab.');
+                    } else if (data.chips_failed > 0) {
+                        lines.push('PCA driver init failed — try scan again or reboot.');
+                    } else if ((data.pca9685 || []).length > 0) {
+                        lines.push('Configuration matches scan — no update needed.');
+                    } else {
+                        lines.push('No mapping changes needed.');
+                    }
+                } else {
+                    lines.push('');
+                    if (willRemove.length > 0) {
+                        lines.push('Would remove from config: ' + formatI2cAddrList(willRemove));
+                    }
+                    if (willAdd.length > 0) {
+                        lines.push('Would add to config: ' + formatI2cAddrList(willAdd));
+                    }
+                    lines.push('');
+                    lines.push('Click "Apply Scan Results" to update saved mappings.');
+                }
+                return lines.join('\n');
+            }
+
             async function scanI2cDevices() {
-                // Note the corrected variable names being passed here
                 setLoadingState(scanI2cButton, scanI2cBtnText, scanI2cSpinner, true);
-                showStatus(`Scanning I2C devices...`, 'loading');
-                statusEl.textContent = 'Scanning...'; // Use the dedicated status element
+                applyI2cButton.classList.add('hidden');
+                lastI2cScanResult = null;
+                showStatus('Scanning I2C devices...', 'loading');
+                statusEl.textContent = 'Scanning...';
                 statusEl.style.color = 'orange';
 
                 try {
-                    const response = await fetch(`/api/i2c/scan`, {
-                        method: 'POST' // No headers needed for this simple request
-                    });
+                    const response = await fetch('/api/i2c/scan', { method: 'POST' });
                     if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
                     const data = await response.json();
-                    let statusText = data.message || 'I2C scan complete.';
-                    if (data.other_devices && data.other_devices.length > 0) {
-                        const addrs = data.other_devices.map(a => '0x' + Number(a).toString(16).toUpperCase().padStart(2, '0')).join(', ');
-                        statusText += ' DS3231 RTC at ' + addrs + ' detected.';
-                    }
-                    showStatus(statusText, 'success');
-                    statusEl.textContent = statusText;
+                    lastI2cScanResult = data;
+
+                    const summary = buildI2cScanSummary(data);
+                    showStatus(data.message || 'I2C scan complete.', 'success');
+                    statusEl.textContent = summary;
                     statusEl.style.color = 'green';
 
-                    // Optional: Refresh the page after a successful scan to see new devices
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 2000);
-
+                    const needsApply = ((data.to_remove && data.to_remove.length > 0) ||
+                        (data.to_add && data.to_add.length > 0)) &&
+                        (data.pca9685 || []).length > 0;
+                    if (needsApply) {
+                        applyI2cButton.classList.remove('hidden');
+                    }
                 } catch (error) {
                     console.error('I2C scan error:', error);
                     showStatus('Failed to scan I2C devices.', 'error');
@@ -2508,6 +2618,70 @@
                     statusEl.style.color = 'red';
                 } finally {
                     setLoadingState(scanI2cButton, scanI2cBtnText, scanI2cSpinner, false);
+                }
+            }
+
+            async function applyI2cScanResults() {
+                if (!lastI2cScanResult) {
+                    showStatus('Run an I2C scan first.', 'error');
+                    return;
+                }
+
+                const detected = lastI2cScanResult.pca9685 || [];
+                if (detected.length === 0) {
+                    showStatus('Cannot apply: scan found no PCA9685 boards.', 'error');
+                    return;
+                }
+                const removeList = formatI2cAddrList(lastI2cScanResult.to_remove || []);
+                const addList = formatI2cAddrList(lastI2cScanResult.to_add || []);
+                const detectedList = formatI2cAddrList(detected);
+
+                let confirmMsg = 'Update I2C configuration to match the scan?\n\n';
+                confirmMsg += 'Detected PCA9685: ' + detectedList + '\n';
+                if ((lastI2cScanResult.to_remove || []).length > 0) {
+                    confirmMsg += 'Remove from config: ' + removeList + '\n';
+                }
+                if ((lastI2cScanResult.to_add || []).length > 0) {
+                    confirmMsg += 'Add to config: ' + addList + '\n';
+                }
+                confirmMsg += '\nMapped outputs on removed boards will be deleted. Continue?';
+
+                if (!window.confirm(confirmMsg)) {
+                    showStatus('I2C configuration not changed.', 'loading');
+                    return;
+                }
+
+                setLoadingState(applyI2cButton, applyI2cBtnText, applyI2cSpinner, true);
+                showStatus('Applying I2C scan results...', 'loading');
+
+                try {
+                    const response = await fetch('/api/i2c/apply', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ pca9685: detected })
+                    });
+                    if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+                    const data = await response.json();
+                    if (data.status === 'error') {
+                        showStatus(data.message || 'Apply refused.', 'error');
+                        statusEl.textContent = data.message || 'Apply refused.';
+                        statusEl.style.color = 'red';
+                        return;
+                    }
+                    showStatus(data.message || 'I2C configuration updated.', 'success');
+                    statusEl.textContent = 'Configuration updated.\nDetected PCA9685: ' +
+                        formatI2cAddrList(data.pca9685);
+                    statusEl.style.color = 'green';
+                    applyI2cButton.classList.add('hidden');
+                    lastI2cScanResult = null;
+                    setTimeout(() => window.location.reload(), 2000);
+                } catch (error) {
+                    console.error('I2C apply error:', error);
+                    showStatus('Failed to apply I2C scan results.', 'error');
+                    statusEl.textContent = 'Failed to apply I2C scan results.';
+                    statusEl.style.color = 'red';
+                } finally {
+                    setLoadingState(applyI2cButton, applyI2cBtnText, applyI2cSpinner, false);
                 }
             }
                 

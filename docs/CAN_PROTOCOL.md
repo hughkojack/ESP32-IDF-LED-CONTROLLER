@@ -68,7 +68,6 @@ CAN_ID = (0x3 << 7) | target_node_id. Payload: byte 0 = command, bytes 1-7 = com
 - 0x07 CMD_SET_INPUT_LABEL: input_index, total_len_or_0xFF, up to 6 chars per frame. Multi-frame for labels longer than 6 chars. Byte 2 = total length (1..24) on first frame, 0xFF on continuation; use 0 to clear label.
 - 0x08 CMD_SET_DATETIME: Unix timestamp (uint32_t LE, bytes 1–4). Hub sends UTC; LCD applies CMD_SET_TIMEZONE and uses localtime() for display.
 - 0x09 CMD_REBOOT: no payload; node restarts.
-- 0x0A CMD_SET_CAN_LINK_INDICATOR: gpio (0–48 = CAN link LED: solid=good link, flash=bad/no link; 0xFF=disable). Mechanical node only.
 - 0x0B CMD_SET_TIMEZONE: multi-frame like CMD_SET_INPUT_LABEL: byte 1 = total_len (first frame) or 0xFF (continuation), bytes 2–7 = TZ string (e.g. `Australia/Sydney`), 6 chars per frame. Hub sends before CMD_SET_DATETIME so LCD can setenv("TZ", ...) and show local time.
 - 0x0C CMD_SET_NIGHT_LIGHT: `enabled` (0=off, 1=on), `brightness` (0–100). **Mechanical node only** — WS2812 night light (warm white); stored in node NVS. Does not affect LCD nodes.
 - 0x0D CMD_SET_WS2812_CLICK_EFFECT: `effect` (0=strobe, 1=chase). **Mechanical node only** — stores click/double-click LED feedback style in NVS; does not drive the strip until the user presses a switch. Click and double-click use the same effect.

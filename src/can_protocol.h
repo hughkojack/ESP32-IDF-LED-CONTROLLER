@@ -46,7 +46,6 @@ enum CanMessageType : uint8_t {
 #define CMD_SET_INPUT_LABEL     0x07
 #define CMD_SET_DATETIME        0x08  // payload: Unix timestamp (uint32_t LE, bytes 1-4); hub sends every hour
 #define CMD_REBOOT              0x09  // no payload; node restarts
-#define CMD_SET_CAN_LINK_INDICATOR 0x0A  // payload: [gpio]; GPIO 0-48 for CAN link LED (solid=good link, flash=bad/no link), 0xFF=disable
 #define CMD_SET_TIMEZONE          0x0B  // payload: multi-frame like CMD_SET_INPUT_LABEL: byte 1 = total_len (first) or 0xFF (cont.), bytes 2-7 = TZ string (6 chars/frame); hub sends before CMD_SET_DATETIME so LCD can use localtime()
 #define CMD_SET_NIGHT_LIGHT       0x0C  // payload: [enabled 0/1, brightness 0-100]; mechanical WS2812 night light
 #define CMD_SET_WS2812_CLICK_EFFECT 0x0D  // payload: [effect 0=strobe, 1=chase]; click/double-click LED feedback (NVS)

@@ -36,6 +36,7 @@ extern "C" {
 //#include "esp_eth_driver.h"
 
 #include "hardware_config.h"
+#include "i2c_bus_lock.h"
 #if defined(BOARD_RACK32)
     #include "esp_mac.h"
 #endif
@@ -46,6 +47,7 @@ extern "C" {
 #include "hsg_outputs.h"
 #include "hsg_pca9685.h"
 #include "ds3231.h"
+#include "mcp9808.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include <ctime>
@@ -67,6 +69,8 @@ static const int ETH_CONNECTED_BIT = BIT0;
 static const int WIFI_CONNECTED_BIT = BIT1;
 static bool s_eth_connected = false;
 static bool s_wifi_connected = false;
+static bool s_outputs_init_done = false;
+static bool s_wifi_failover_pending = false;
 static esp_netif_t *s_eth_netif = NULL;
 static esp_netif_t *s_wifi_netif = NULL;
 i2c_master_bus_handle_t i2c_bus_handle;
@@ -174,8 +178,6 @@ struct NodeInfo {
     uint8_t input_active_high[MAX_INPUTS_PER_NODE];
     // Output index (0-255) used by node for Find Me blink; 0xFF = unset (node default)
     uint8_t find_me_output_index;
-    // CAN link indicator GPIO (mechanical node): 0-48 = GPIO solid when link OK, flash when bad/no link; 0xFF = disabled
-    uint8_t can_link_indicator_gpio;
     // WS2812 night light (mechanical node)
     bool night_light_on;
     uint8_t night_light_brightness;
@@ -187,7 +189,7 @@ struct NodeInfo {
     uint8_t ota_capable;
     char last_ota_result[32];
 
-    NodeInfo() : node_id(0), node_type(0), input_count(0), last_seen_timestamp_us(0), is_configured(false), find_me_output_index(0xFF), can_link_indicator_gpio(0xFF), night_light_on(false), night_light_brightness(0), ws2812_click_effect(0), fw_version(0), ota_capable(0) {
+    NodeInfo() : node_id(0), node_type(0), input_count(0), last_seen_timestamp_us(0), is_configured(false), find_me_output_index(0xFF), night_light_on(false), night_light_brightness(0), ws2812_click_effect(0), fw_version(0), ota_capable(0) {
         last_ota_result[0] = '\0';
         ws2812_effect_params_set_defaults(&ws2812_strobe, 0);
         ws2812_effect_params_set_defaults(&ws2812_chase, 1);
@@ -251,6 +253,17 @@ static void defer_save_nodes_to_config(void);
 //-----------------------------------------------------------------------
 
 /*--------------------------- Function Declarations ---------------------------*/
+static void reinit_task_wdt_no_idle(void)
+{
+    esp_task_wdt_deinit();
+    esp_task_wdt_config_t twdt_config = {
+        .timeout_ms = 30000,
+        .idle_core_mask = 0,
+        .trigger_panic = true
+    };
+    ESP_ERROR_CHECK(esp_task_wdt_init(&twdt_config));
+}
+
 static esp_err_t i2c_master_init(void);
 void main_task(void *pvParameter);
 void animation_task(void *pvParameter);
@@ -258,7 +271,7 @@ void can_processing_task(void *pvParameter);
 static void IRAM_ATTR gpio_isr_handler(void* arg);
 static void wifi_start(void);
 static void rtc_auto_sync_task(void *pvParameter);
-void setOutput(int output, int brightness, int fadeMs, unsigned long startTimeOffset = 0);
+void setOutput(int output, int brightness, int fadeMs, unsigned long startTimeOffset);
 static void send_node_config(uint8_t target_node_id, uint8_t cmd, const uint8_t* data, size_t len);
 static void set_node_input_label_impl(uint8_t node_id, uint8_t input_index, const char* label);
 // Remove node from registry and persist; returns true if node was present and removed.
@@ -268,20 +281,59 @@ void set_esp32_mac_on_w5500(esp_eth_handle_t eth_handle);
 static std::string sync_rtc_from_system_time();
 static void format_fw_version(uint16_t ver, char* out, size_t out_len);
 
-// --- Core Logic ---
-void setOutput(int output, int brightness, int fadeMs, unsigned long startTimeOffset) {
-    int outputIndex = output - 1;
-    if (outputIndex < 0 || outputIndex >= MAX_OUTPUTS) return;
-
-    outputs[outputIndex].startPwmValue = outputs[outputIndex].currentPwmValue;
-    outputs[outputIndex].targetPwmValue = (int)roundf(brightness / 100.0f * 4095.0f);
-    outputs[outputIndex].fadeStartTime = esp_log_timestamp() + startTimeOffset;
-    outputs[outputIndex].fadeDuration = (fadeMs > 0) ? fadeMs : 1; // Prevent division by zero
-
-    // Store the last "ON" brightness for stateful commands
-    if (brightness > 0) {
-        outputBrightness[outputIndex] = brightness;
+static void reset_output_pwm_states() {
+    for (int i = 0; i < MAX_OUTPUTS; ++i) {
+        outputs[i].startPwmValue = 0;
+        outputs[i].currentPwmValue = 0;
+        outputs[i].targetPwmValue = 0;
+        outputs[i].fadeStartTime = 0;
+        outputs[i].fadeDuration = DEFAULT_FADE_MS;
     }
+}
+
+static esp_err_t apply_output_pwm(int logical_output, int pwm_value,
+                                  uint8_t* out_addr, uint8_t* out_channel) {
+    uint8_t addr = 0;
+    uint8_t channel = 0;
+    if (!hsg_outputs_get_mapping(logical_output, &addr, &channel)) {
+        ESP_LOGW(TAG, "No PCA mapping for output %d", logical_output);
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (out_addr) *out_addr = addr;
+    if (out_channel) *out_channel = channel;
+    esp_err_t result = hsg_pca9685::pca9685_write_pwm_value(addr, channel, (uint16_t)pwm_value);
+    if (result != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to write PWM %d to PCA@0x%02X ch%d: %s",
+                 pwm_value, addr, channel, esp_err_to_name(result));
+        return result;
+    }
+    ESP_LOGI(TAG, "Output %d -> PCA@0x%02X ch%d PWM=%d", logical_output, addr, channel, pwm_value);
+    return ESP_OK;
+}
+
+static esp_err_t setOutputEx(int output, int brightness, int fadeMs, unsigned long startTimeOffset = 0) {
+    int outputIndex = output - 1;
+    if (outputIndex < 0 || outputIndex >= MAX_OUTPUTS) return ESP_ERR_INVALID_ARG;
+
+    const int newTarget = (int)roundf(brightness / 100.0f * 4095.0f);
+    outputs[outputIndex].startPwmValue = outputs[outputIndex].currentPwmValue;
+    outputs[outputIndex].targetPwmValue = newTarget;
+    outputs[outputIndex].fadeStartTime = esp_log_timestamp() + startTimeOffset;
+    outputs[outputIndex].fadeDuration = (fadeMs > 0) ? fadeMs : 1;
+
+    if (brightness > 0)
+        outputBrightness[outputIndex] = brightness;
+
+    if (fadeMs <= 0) {
+        outputs[outputIndex].currentPwmValue = newTarget;
+        outputs[outputIndex].startPwmValue = newTarget;
+        return apply_output_pwm(output, newTarget, nullptr, nullptr);
+    }
+    return ESP_OK;
+}
+
+void setOutput(int output, int brightness, int fadeMs, unsigned long startTimeOffset) {
+    setOutputEx(output, brightness, fadeMs, startTimeOffset);
 }
 
 // Background task to automatically keep the DS3231 RTC in sync with system time.
@@ -292,6 +344,11 @@ void setOutput(int output, int brightness, int fadeMs, unsigned long startTimeOf
 static void rtc_auto_sync_task(void *pvParameter)
 {
     (void)pvParameter;
+
+    if (!ds3231_is_installed()) {
+        vTaskDelete(NULL);
+        return;
+    }
 
     time_t last_sync_time = 0;
 
@@ -353,69 +410,64 @@ void processFades() {
 
             // Only update the physical PWM chip if the value has actually changed
             if (newPwmValue != outputs[i].currentPwmValue) {
-                outputs[i].currentPwmValue = newPwmValue;
-                
                 uint8_t addr;
                 uint8_t channel;
-                // Get the physical address from our mapping component
                 if (hsg_outputs_get_mapping(i + 1, &addr, &channel)) {
-                    esp_err_t result = hsg_pca9685::pca9685_write_pwm_value(addr, channel, newPwmValue);
+                    esp_err_t result = hsg_pca9685::pca9685_write_pwm_value(addr, channel, (uint16_t)newPwmValue);
                     if (result != ESP_OK) {
                         ESP_LOGE(TAG, "Failed to write PWM value to PCA@0x%02X ch%d. Error: %s", addr, channel, esp_err_to_name(result));
+                    } else {
+                        outputs[i].currentPwmValue = newPwmValue;
                     }
+                } else {
+                    outputs[i].currentPwmValue = newPwmValue;
                 }
             }
         }
     }
 }
 
-void processCommand(const Command& cmd) {
+static HSG::API::CommandFeedback processCommand(const Command& cmd) {
+    HSG::API::CommandFeedback fb;
+    fb.mapped_outputs_total = hsg_outputs_get_mapped_count();
+    fb.state = cmd.state;
+    fb.fade_ms = cmd.fade_ms;
+
     if (cmd.type == TargetType::OUTPUT) {
+        fb.target_type = "output";
+        fb.output = cmd.output_id;
         ESP_LOGI(TAG, "Processing command for output: %d, state=%s, brightness=%d, fade=%dms",
                 cmd.output_id, cmd.state.c_str(), cmd.brightness, cmd.fade_ms);
-    } else { // It's a group
+    } else {
+        fb.target_type = "group";
+        fb.group = cmd.group_name;
         ESP_LOGI(TAG, "Processing command for group: '%s', state=%s, brightness=%d, fade=%dms",
                 cmd.group_name.c_str(), cmd.state.c_str(), cmd.brightness, cmd.fade_ms);
     }
     
     int final_brightness = 0;
-    // If brightness is explicitly provided and > 0, use it. If state is ON and brightness is 0, treat as "not set" and use default 50%.
-    if (cmd.brightness > 0) {
-        final_brightness = cmd.brightness;
-    }
-    else if (cmd.brightness == 0 && cmd.state == "OFF") {
-        final_brightness = 0;
-    }
-    else if (cmd.state == "ON") {
-        final_brightness = 50;  // default when not specified (e.g. web UI "ON" with no brightness)
-    } else if (cmd.state == "OFF") {
+    if (cmd.state == "OFF") {
         final_brightness = 0;
     } else if (cmd.state == "TOGGLE") {
-        bool should_turn_on = true; // Default action is to turn ON
+        bool should_turn_on = true;
 
         if (cmd.type == TargetType::GROUP) {
-            // For a group, check all members to see if any are on
             cJSON* config = HSG::API::get_config_json_obj();
             if (config) {
                 cJSON* groups = cJSON_GetObjectItem(config, "groups");
-                
-                // CORRECTED REFERENCE: Get the group *object* first
                 cJSON* specific_group = cJSON_GetObjectItem(groups, cmd.group_name.c_str());
-                
+
                 if (cJSON_IsObject(specific_group)) {
-                    // CORRECTED REFERENCE: Get the 'outputs' array from *within* the object
                     cJSON* group_outputs = cJSON_GetObjectItem(specific_group, "outputs");
 
                     if (cJSON_IsArray(group_outputs)) {
-                        // Loop through the group to see if any light is on
                         cJSON* output_item = NULL;
                         cJSON_ArrayForEach(output_item, group_outputs) {
                             int output_id_to_check = output_item->valueint;
                             if (output_id_to_check > 0 && output_id_to_check <= MAX_OUTPUTS) {
-                                // Check the live state of the light
                                 if (outputs[output_id_to_check - 1].targetPwmValue > 0) {
-                                    should_turn_on = false; // Found a light that's on, so our action is to turn OFF
-                                    break; // No need to check further
+                                    should_turn_on = false;
+                                    break;
                                 }
                             }
                         }
@@ -423,18 +475,22 @@ void processCommand(const Command& cmd) {
                 }
                 cJSON_Delete(config);
             }
-        } else { // This is a command for a single OUTPUT
-            if (cmd.output_id > 0 && cmd.output_id <= MAX_OUTPUTS) {
-                if (outputs[cmd.output_id - 1].targetPwmValue > 0) {
-                    should_turn_on = false; // The single light is on, so turn it off
-                }
+        } else if (cmd.output_id > 0 && cmd.output_id <= MAX_OUTPUTS) {
+            if (outputs[cmd.output_id - 1].targetPwmValue > 0) {
+                should_turn_on = false;
             }
         }
 
-        // Now, determine the final brightness based on the collective state
-        final_brightness = should_turn_on ? 50 : 0;  // default on = 50% when not specified
+        if (should_turn_on) {
+            final_brightness = (cmd.brightness > 0) ? cmd.brightness : 50;
+        } else {
+            final_brightness = 0;
+        }
+    } else if (cmd.state == "ON") {
+        final_brightness = (cmd.brightness > 0) ? cmd.brightness : 50;
+    } else if (cmd.state.empty()) {
+        final_brightness = cmd.brightness;
     } else {
-        // Nothing provided (shouldn't happen)
         final_brightness = 0;
     }
     ESP_LOGI(TAG, "Final brightness=%d", final_brightness);
@@ -443,23 +499,47 @@ void processCommand(const Command& cmd) {
     if (final_brightness > 100) final_brightness = 100; 
 
     if (cmd.type == TargetType::OUTPUT) {
-        setOutput(cmd.output_id, final_brightness, cmd.fade_ms);
-/*
-        cJSON* root = cJSON_CreateObject();
-        cJSON_AddStringToObject(root, "type", "state");
-        cJSON_AddNumberToObject(root, "output", cmd.output_id);
-        cJSON_AddNumberToObject(root, "brightness", final_brightness);
-        char* json_str = cJSON_PrintUnformatted(root);
-        HSG::API::send_ws_message(std::string(json_str));
-        cJSON_Delete(root);
-        free(json_str);
-*/
-        } else if (cmd.type == TargetType::GROUP) {
+        fb.brightness_pct = final_brightness;
+        fb.pwm = (int)roundf(final_brightness / 100.0f * 4095.0f);
+
+        uint8_t addr = 0, channel = 0;
+        fb.mapping_found = hsg_outputs_get_mapping(cmd.output_id, &addr, &channel);
+        if (fb.mapping_found) {
+            fb.pca_addr = addr;
+            fb.pca_channel = channel;
+        }
+
+        esp_err_t write_result = setOutputEx(cmd.output_id, final_brightness, cmd.fade_ms, 0);
+        fb.outputs_affected = 1;
+
+        if (!fb.mapping_found) {
+            fb.ok = false;
+            fb.message = "No PCA9685 mapping for output " + std::to_string(cmd.output_id);
+        } else if (cmd.fade_ms > 0) {
+            fb.deferred_fade = true;
+            fb.ok = true;
+            fb.message = "Command accepted; PWM will update during fade";
+        } else if (write_result == ESP_OK) {
+            fb.i2c_written = true;
+            fb.ok = true;
+            fb.message = "I2C PWM write OK";
+        } else {
+            fb.ok = false;
+            fb.i2c_error = esp_err_to_name(write_result);
+            fb.message = std::string("I2C PWM write failed: ") + fb.i2c_error;
+        }
+        return fb;
+    } else if (cmd.type == TargetType::GROUP) {
         cJSON* config = HSG::API::get_config_json_obj();
         if (!config) {
             ESP_LOGE(TAG, "Failed to get config to process group command.");
-            return;
+            fb.ok = false;
+            fb.message = "Failed to load configuration";
+            return fb;
         }
+
+        fb.brightness_pct = final_brightness;
+        fb.pwm = (int)roundf(final_brightness / 100.0f * 4095.0f);
 
         int global_stagger_ms = 0;
         cJSON* settings = cJSON_GetObjectItem(config, "settings");
@@ -469,14 +549,15 @@ void processCommand(const Command& cmd) {
         cJSON* groups = cJSON_GetObjectItem(config, "groups");
         cJSON* specific_group = cJSON_GetObjectItem(groups, cmd.group_name.c_str());
 
-//        cJSON* group_outputs = cJSON_GetObjectItem(groups, cmd.group_name.c_str());
-
         if (cJSON_IsObject(specific_group)) {
             bool stagger_is_enabled = cJSON_IsTrue(cJSON_GetObjectItem(specific_group, "staggerEnabled"));
             cJSON* group_outputs = cJSON_GetObjectItem(specific_group, "outputs");
 
             if (cJSON_IsArray(group_outputs)) {
                 int channel_index = 0;
+                int i2c_ok_count = 0;
+                int i2c_fail_count = 0;
+                int unmapped_count = 0;
                 cJSON* output_item = NULL;
                 cJSON_ArrayForEach(output_item, group_outputs) {
                     if (cJSON_IsNumber(output_item)) {
@@ -486,39 +567,50 @@ void processCommand(const Command& cmd) {
                         if (stagger_is_enabled && global_stagger_ms > 0) {
                             delay_offset = channel_index * global_stagger_ms;
                         }
-                        setOutput(output_id, final_brightness, cmd.fade_ms, delay_offset);
-                        channel_index++;
-/*
-                        // Updates the individual light buttons
-                        cJSON* individual_update = cJSON_CreateObject();
-                        cJSON_AddStringToObject(individual_update, "type", "state");
-                        cJSON_AddNumberToObject(individual_update, "output", output_id);
-                        cJSON_AddNumberToObject(individual_update, "brightness", final_brightness);
-                        char* json_str = cJSON_PrintUnformatted(individual_update);
-                        HSG::API::send_ws_message(std::string(json_str));
-                        cJSON_Delete(individual_update);
-                        free(json_str);
-*/
+                        uint8_t addr = 0, ch = 0;
+                        if (!hsg_outputs_get_mapping(output_id, &addr, &ch))
+                            unmapped_count++;
+                        esp_err_t wr = setOutputEx(output_id, final_brightness, cmd.fade_ms, delay_offset);
+                        if (cmd.fade_ms <= 0) {
+                            if (wr == ESP_OK) i2c_ok_count++;
+                            else if (wr != ESP_ERR_NOT_FOUND) i2c_fail_count++;
                         }
+                        fb.outputs_affected++;
+                        channel_index++;
+                    }
                 }
-/*
-                // Broadcast the update for the group itself
-                cJSON* group_update = cJSON_CreateObject();
-                cJSON_AddStringToObject(group_update, "type", "state");
-                cJSON_AddStringToObject(group_update, "group", cmd.group_name.c_str());
-                cJSON_AddNumberToObject(group_update, "brightness", final_brightness);
-                char* json_str_group = cJSON_PrintUnformatted(group_update);
-                HSG::API::send_ws_message(std::string(json_str_group));
-                cJSON_Delete(group_update);
-                free(json_str_group);
-*/
-                }    
-
+                if (cmd.fade_ms > 0) {
+                    fb.deferred_fade = true;
+                    fb.ok = fb.outputs_affected > 0;
+                    fb.message = "Group command accepted; fade in progress for " +
+                        std::to_string(fb.outputs_affected) + " output(s)";
+                } else if (i2c_fail_count > 0) {
+                    fb.ok = false;
+                    fb.message = "Group: " + std::to_string(i2c_ok_count) + " I2C OK, " +
+                        std::to_string(i2c_fail_count) + " failed, " +
+                        std::to_string(unmapped_count) + " unmapped";
+                } else if (unmapped_count > 0 && i2c_ok_count == 0) {
+                    fb.ok = false;
+                    fb.message = "Group: no mapped outputs (" + std::to_string(unmapped_count) + " unmapped)";
+                } else {
+                    fb.ok = true;
+                    fb.i2c_written = i2c_ok_count > 0;
+                    fb.message = "Group: " + std::to_string(i2c_ok_count) + " I2C write(s) OK";
+                    if (unmapped_count > 0)
+                        fb.message += ", " + std::to_string(unmapped_count) + " unmapped skipped";
+                }
+            } else {
+                fb.ok = false;
+                fb.message = "Group has no outputs configured";
+            }
         } else {
             ESP_LOGW(TAG, "Group '%s' not found in configuration.", cmd.group_name.c_str());
+            fb.ok = false;
+            fb.message = "Group '" + cmd.group_name + "' not found";
         }
         cJSON_Delete(config);
     }
+    return fb;
 }
 /* ---------------------- Network Logic ---------------------- */
 static void phy_power_set(bool on) {
@@ -547,8 +639,12 @@ static void net_event_handler(void* arg, esp_event_base_t event_base,
         } else if (event_id == ETHERNET_EVENT_DISCONNECTED) {
             ESP_LOGI(TAG, "Ethernet Link Down");
             s_eth_connected = false;
-            // Ethernet lost, start Wi-Fi as a backup
-            wifi_start();
+            if (s_outputs_init_done) {
+                wifi_start();
+            } else {
+                s_wifi_failover_pending = true;
+                ESP_LOGI(TAG, "Wi-Fi failover deferred until PCA/output init completes");
+            }
         }
     }
     if (event_base == WIFI_EVENT) {
@@ -603,6 +699,10 @@ static void net_event_handler(void* arg, esp_event_base_t event_base,
 // Returns empty string on success, or a human-readable error message on failure.
 static std::string sync_rtc_from_system_time()
 {
+    if (!ds3231_is_installed()) {
+        return "DS3231 RTC not installed";
+    }
+
     time_t t = time(nullptr);
     if (t < 1600000000) {  // system time not set or unreasonable (before Sep 2020)
         return "System time not set or too old. Configure NTP or set time first.";
@@ -1056,8 +1156,6 @@ static void load_nodes_from_config(void) {
                 } else if (item && cJSON_IsNumber(item)) {
                     node.find_me_output_index = (uint8_t)(item->valueint & 0xFF);
                 }
-                item = cJSON_GetObjectItem(node_json, "can_link_indicator_gpio");
-                if (item && cJSON_IsNumber(item)) node.can_link_indicator_gpio = (uint8_t)(item->valueint & 0xFF);
                 item = cJSON_GetObjectItem(node_json, "night_light_on");
                 if (item && cJSON_IsBool(item)) node.night_light_on = cJSON_IsTrue(item);
                 item = cJSON_GetObjectItem(node_json, "night_light_brightness");
@@ -1121,8 +1219,6 @@ static void save_nodes_to_config(void) {
             cJSON_AddBoolToObject(node_json, "is_configured", node.is_configured);
             if (node.node_type != NODE_TYPE_MECHANICAL && node.find_me_output_index != 0xFF)
                 cJSON_AddNumberToObject(node_json, "find_me_output_index", node.find_me_output_index);
-            if (node.can_link_indicator_gpio != 0xFF)
-                cJSON_AddNumberToObject(node_json, "can_link_indicator_gpio", node.can_link_indicator_gpio);
             if (node.node_type == NODE_TYPE_MECHANICAL) {
                 cJSON_AddBoolToObject(node_json, "night_light_on", node.night_light_on);
                 cJSON_AddNumberToObject(node_json, "night_light_brightness", node.night_light_brightness);
@@ -1191,8 +1287,6 @@ static cJSON* get_nodes_json_for_config_save(void) {
         cJSON_AddBoolToObject(node_json, "is_configured", node.is_configured);
         if (node.node_type != NODE_TYPE_MECHANICAL && node.find_me_output_index != 0xFF)
             cJSON_AddNumberToObject(node_json, "find_me_output_index", node.find_me_output_index);
-        if (node.can_link_indicator_gpio != 0xFF)
-            cJSON_AddNumberToObject(node_json, "can_link_indicator_gpio", node.can_link_indicator_gpio);
         if (node.node_type == NODE_TYPE_MECHANICAL) {
             cJSON_AddBoolToObject(node_json, "night_light_on", node.night_light_on);
             cJSON_AddNumberToObject(node_json, "night_light_brightness", node.night_light_brightness);
@@ -1284,8 +1378,6 @@ static cJSON* get_nodes_json(void) {
                 } else if (item && cJSON_IsNumber(item)) {
                     node.find_me_output_index = (uint8_t)(item->valueint & 0xFF);
                 }
-                item = cJSON_GetObjectItem(node_json, "can_link_indicator_gpio");
-                if (item && cJSON_IsNumber(item)) node.can_link_indicator_gpio = (uint8_t)(item->valueint & 0xFF);
                 item = cJSON_GetObjectItem(node_json, "night_light_on");
                 if (item && cJSON_IsBool(item)) node.night_light_on = cJSON_IsTrue(item);
                 item = cJSON_GetObjectItem(node_json, "night_light_brightness");
@@ -1345,8 +1437,6 @@ static cJSON* get_nodes_json(void) {
         cJSON_AddStringToObject(node_json, "type_string", type_str);
         if (node.node_type != NODE_TYPE_MECHANICAL && node.find_me_output_index != 0xFF)
             cJSON_AddNumberToObject(node_json, "find_me_output_index", node.find_me_output_index);
-        if (node.can_link_indicator_gpio != 0xFF)
-            cJSON_AddNumberToObject(node_json, "can_link_indicator_gpio", node.can_link_indicator_gpio);
         if (node.node_type == NODE_TYPE_MECHANICAL) {
             cJSON_AddBoolToObject(node_json, "night_light_on", node.night_light_on);
             cJSON_AddNumberToObject(node_json, "night_light_brightness", node.night_light_brightness);
@@ -1412,14 +1502,13 @@ extern "C" void app_main(void) {
     // Initialize the core API component and its services
     HSG::API::Init api_init;
     api_init.i2c_port = I2C_MASTER_NUM;
-    api_init.output_cb = [](int out, int brightness, int fade_ms, const char* state_str){
+    api_init.output_cb = [](int out, int brightness, int fade_ms, const char* state_str) -> HSG::API::CommandFeedback {
         Command cmd = {TargetType::OUTPUT, out, "", brightness, fade_ms, state_str ? state_str : ""};
-        processCommand(cmd);
+        return processCommand(cmd);
     };
-    api_init.group_cb = [](const char* name, int brightness, int fade_ms, const char* state_str){
-     //   int brightness = (strcmp(state, "ON") == 0) ? 100 : 0;
+    api_init.group_cb = [](const char* name, int brightness, int fade_ms, const char* state_str) -> HSG::API::CommandFeedback {
         Command cmd = {TargetType::GROUP, 0, std::string(name), brightness, fade_ms, state_str ? state_str : ""};
-        processCommand(cmd);
+        return processCommand(cmd);
     };
     api_init.get_outputs_json_cb = [](){
         return get_current_outputs_json();
@@ -1444,7 +1533,7 @@ extern "C" void app_main(void) {
         return sync_rtc_from_system_time();
     };
     api_init.get_rtc_time_cb = []() {
-        if (!ds3231_probe(i2c_bus_handle)) return std::string("");
+        if (!ds3231_is_installed()) return std::string("");
         struct tm rtc_tm;
         char buf[32];
         std::string first_stale;
@@ -1474,15 +1563,62 @@ extern "C" void app_main(void) {
         if (strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S UTC", &tm) <= 0) return std::string("");
         return std::string(buf);
     };
-
-    HSG::API::start(api_init);
-    HSG::API::mqtt_start();
+    api_init.get_temperature_cb = [](float* celsius) -> bool {
+        if (!celsius) return false;
+        return mcp9808_read_celsius(i2c_bus_handle, celsius) == ESP_OK;
+    };
+    api_init.i2c_after_scan_cb = [](const std::vector<uint8_t>& detected) -> HSG::API::I2cScanFollowup {
+        HSG::API::I2cScanFollowup result;
+        result.mapped_outputs = hsg_outputs_get_mapped_count();
+        if (detected.empty()) {
+            result.message = "No PCA9685 on bus.";
+            return result;
+        }
+        hsg_pca9685::pca9685_invalidate_bus_devices();
+        i2c_bus_recover(i2c_bus_handle);
+        hsg_pca_init_stats_t stats = {0, 0};
+        esp_err_t err = hsg_outputs_init_chips(detected.data(), detected.size(), 3, &stats);
+        result.chips_initialized = stats.ok;
+        result.chips_failed = stats.failed;
+        if (err == ESP_OK) {
+            hsg_outputs_clear_all();
+            reset_output_pwm_states();
+            result.message = "PCA9685 boards initialized.";
+        } else {
+            result.message = "PCA init failed for " + std::to_string(stats.failed) + " chip(s).";
+        }
+        if (result.mapped_outputs == 0)
+            result.message += " Warning: no output mappings loaded.";
+        return result;
+    };
+    api_init.i2c_config_applied_cb = [](const std::vector<uint8_t>& applied) {
+        cJSON* cfg = HSG::API::get_config_json_obj();
+        if (!cfg) return;
+        hsg_outputs_reload_config(cfg);
+        cJSON_Delete(cfg);
+        hsg_pca_init_stats_t stats = {0, 0};
+        if (!applied.empty()) {
+            hsg_pca9685::pca9685_invalidate_bus_devices();
+            i2c_bus_recover(i2c_bus_handle);
+            hsg_outputs_init_chips(applied.data(), applied.size(), 3, &stats);
+        }
+        hsg_outputs_clear_all();
+        reset_output_pwm_states();
+    };
 
     ESP_ERROR_CHECK(i2c_master_init());
+    i2c_bus_set_post_recover_cb(hsg_pca9685_invalidate_bus_devices);
     ESP_LOGI(TAG, "I2C ready: SDA=%d SCL=%d @%dHz", I2C_MASTER_SDA_IO, I2C_MASTER_SCL_IO, I2C_MASTER_FREQ_HZ);
 
-    vTaskDelay(pdMS_TO_TICKS(200));
-    if (ds3231_probe(i2c_bus_handle)) {
+    /* Don't monitor IDLE during multi-second I2C init (but keep TWDT initialized). */
+    reinit_task_wdt_no_idle();
+
+    vTaskDelay(pdMS_TO_TICKS(500));
+    i2c_bus_recover(i2c_bus_handle);
+
+    const bool ds3231_present = ds3231_probe(i2c_bus_handle);
+    ds3231_mark_installed(ds3231_present);
+    if (ds3231_present) {
         struct tm rtc_first, rtc_second;
         int rtc_reads_consistent = 0;
         if (ds3231_get_time(i2c_bus_handle, &rtc_first) == ESP_OK) {
@@ -1496,7 +1632,7 @@ extern "C" void app_main(void) {
             int osf_set = (status & 0x80) ? 1 : 0;
             char rtc_buf[32];
             if (strftime(rtc_buf, sizeof(rtc_buf), "%Y-%m-%d %H:%M:%S UTC", &rtc_first) > 0)
-                ESP_LOGI(TAG, "RTC time at boot: %s (OSF=%d; OSF=1 means oscillator had stopped, e.g. power glitch or battery not maintaining)", rtc_buf, osf_set);
+                ESP_LOGI(TAG, "RTC time at boot: %s (addr=0x%02X, OSF=%d)", rtc_buf, ds3231_get_i2c_addr(), osf_set);
             setenv("TZ", "UTC0", 1);
             tzset();
             int rtc_year = rtc_first.tm_year + 1900;
@@ -1519,15 +1655,45 @@ extern "C" void app_main(void) {
         } else
             ESP_LOGW(TAG, "DS3231 read failed");
     } else
-        ESP_LOGI(TAG, "DS3231 not found, skipping RTC time set");
+        ESP_LOGI(TAG, "DS3231 not found — RTC disabled (no I2C traffic to 0x68/0x69)");
+
+    esp_err_t bus_rr = i2c_bus_recover(i2c_bus_handle);
+    if (bus_rr != ESP_OK) {
+        ESP_LOGW(TAG, "I2C bus recover after RTC probe failed: %s", esp_err_to_name(bus_rr));
+    }
+
+    ESP_LOGI(TAG, "Waiting for PCA9685 boards to stabilize...");
+    vTaskDelay(pdMS_TO_TICKS(3000));
+
+    esp_err_t i2c_rr = i2c_bus_recover(i2c_bus_handle);
+    if (i2c_rr != ESP_OK) {
+        ESP_LOGW(TAG, "I2C bus recover before output init failed: %s", esp_err_to_name(i2c_rr));
+    }
+
+    ESP_ERROR_CHECK(HSG::API::restore_rack32_pca_if_needed(I2C_MASTER_NUM));
 
     cJSON* initial_config = HSG::API::get_config_json_obj();
     ESP_ERROR_CHECK(hsg_outputs_init(I2C_MASTER_NUM, initial_config));
     hsg_outputs_clear_all();
+    reset_output_pwm_states();
+    cJSON_Delete(initial_config);
+    ESP_LOGI(TAG, "Outputs ready: %d mapped", hsg_outputs_get_mapped_count());
 
-    // Now that the API has loaded the config, we can init the outputs
-   // HSG::API::scan_and_prune_i2c(I2C_MASTER_NUM);
-    cJSON_Delete(initial_config); // Clean up
+    i2c_bus_recover(i2c_bus_handle);
+    vTaskDelay(pdMS_TO_TICKS(20));
+
+    s_outputs_init_done = true;
+    if (s_wifi_failover_pending) {
+        ESP_LOGI(TAG, "Starting deferred Wi-Fi failover");
+        s_wifi_failover_pending = false;
+        wifi_start();
+    }
+
+    // MCP9808 probed lazily on first temperature read (avoids boot crash on shared I2C bus).
+
+    // HTTP/MQTT after I2C outputs are initialized so /api/adopt cannot race clear_all.
+    HSG::API::start(api_init);
+    HSG::API::mqtt_start();
 
     g_bindings_mutex = xSemaphoreCreateMutex();
     g_nodes_mutex = xSemaphoreCreateMutex();
@@ -1540,23 +1706,17 @@ extern "C" void app_main(void) {
 
     ESP_LOGI(TAG, "app_main() Initialization complete.");
 
-    esp_task_wdt_deinit();
-
-    esp_task_wdt_config_t twdt_config = {
-        .timeout_ms = 30000,
-        .idle_core_mask = 0,
-        .trigger_panic = true
-    };
-    ESP_ERROR_CHECK(esp_task_wdt_init(&twdt_config));
+    reinit_task_wdt_no_idle();
 
     //xTaskCreate(main_task, "can_gateway", 4096, NULL, 15, NULL); // High priority
     xTaskCreatePinnedToCore(main_task, "can_gateway", 4096, NULL, 15, NULL, 1);
     xTaskCreatePinnedToCore(can_processing_task, "can_logic", 4096, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(animation_task, "animation_task", 4096, NULL, 5, NULL, 0);
 
-    // Background RTC auto-sync task: performs a one-time sync after NTP has set
-    // system time, then re-syncs periodically every RTC_AUTO_SYNC_INTERVAL_SEC.
-    xTaskCreatePinnedToCore(rtc_auto_sync_task, "rtc_auto_sync_task", 4096, NULL, 4, NULL, 1);
+    // Background RTC auto-sync only when a DS3231 is present.
+    if (ds3231_is_installed()) {
+        xTaskCreatePinnedToCore(rtc_auto_sync_task, "rtc_auto_sync_task", 4096, NULL, 4, NULL, 1);
+    }
 }
 
 bool initialize_mcp2515_with_retry() {
@@ -1819,17 +1979,6 @@ static void send_node_config(uint8_t target_node_id, uint8_t cmd, const uint8_t*
                             ESP_LOGI(TAG, "find_me_output_index ignored for mechanical node %u (WS2812 strip)", (unsigned)target_node_id);
                         xSemaphoreGive(g_nodes_mutex);
                     }
-                }
-            }
-            if (cmd == CMD_SET_CAN_LINK_INDICATOR && len >= 1 && data) {
-                if (g_nodes_mutex && xSemaphoreTake(g_nodes_mutex, portMAX_DELAY) == pdTRUE) {
-                    auto it = g_nodes.find(target_node_id);
-                    if (it != g_nodes.end()) {
-                        it->second.can_link_indicator_gpio = data[0];
-                        ESP_LOGI(TAG, "can_link_indicator_gpio=%u for node %u", (unsigned)data[0], (unsigned)target_node_id);
-                    }
-                    xSemaphoreGive(g_nodes_mutex);
-                    save_nodes_to_config();
                 }
             }
             if (cmd == CMD_SET_NIGHT_LIGHT && len >= 2 && data) {
@@ -2380,6 +2529,7 @@ static void IRAM_ATTR gpio_isr_handler(void* arg) {
 }
 
 static esp_err_t i2c_master_init(void) {
+    i2c_bus_lock_init();
     i2c_master_bus_config_t i2c_mst_config = {};
     i2c_mst_config.clk_source = I2C_CLK_SRC_DEFAULT;
     i2c_mst_config.i2c_port = I2C_MASTER_NUM;

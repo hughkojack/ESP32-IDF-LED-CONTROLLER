@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
 #include "esp_http_server.h"
 #include "cJSON.h"
 #include "freertos/event_groups.h"
@@ -21,16 +22,43 @@ namespace API {
 
 EventGroupHandle_t get_event_group();
 
+struct I2cScanFollowup {
+    int mapped_outputs = 0;
+    int chips_initialized = 0;
+    int chips_failed = 0;
+    std::string message;
+};
+
+struct CommandFeedback {
+    bool ok = false;
+    std::string target_type;   // "output" or "group"
+    int output = 0;
+    std::string group;
+    std::string state;
+    int brightness_pct = 0;
+    int pwm = 0;
+    int fade_ms = 0;
+    bool mapping_found = false;
+    int pca_addr = -1;
+    int pca_channel = -1;
+    bool i2c_written = false;
+    bool deferred_fade = false;
+    std::string i2c_error;
+    int outputs_affected = 0;
+    int mapped_outputs_total = 0;
+    std::string message;
+};
+
 struct Init {
     int i2c_port = 0;                 // I2C_NUM_0 or I2C_NUM_1 (your I2C must be initialized by app)
     uint32_t i2c_scan_start = 0x40;   // first 7-bit addr to scan (default PCA9685 range)
     uint32_t i2c_scan_end   = 0x7F;   // last 7-bit addr to scan
 
-    // output_cb(out, brightness[0..100], fade_ms)
-    std::function<void(int out, int brightness, int fade_ms, const char* state)> output_cb;
+    // output_cb — returns diagnostic feedback for the web UI
+    std::function<CommandFeedback(int out, int brightness, int fade_ms, const char* state)> output_cb;
 
-    // group_cb(name, state["ON"/"OFF"], fade_ms)
-    std::function<void(const char* name, int brightness, int fade_ms, const char* state)> group_cb;
+    // group_cb — returns summary feedback for the web UI
+    std::function<CommandFeedback(const char* name, int brightness, int fade_ms, const char* state)> group_cb;
 
     // NEW: Callback to notify main that config has been updated
     std::function<void()> config_updated_cb;
@@ -53,6 +81,15 @@ struct Init {
     std::function<std::string()> get_rtc_time_cb;
     // Return current hub (system) time string for display. Optional.
     std::function<std::string()> get_system_time_cb;
+
+    // Board temperature from MCP9808 (if installed). Returns true and sets *celsius on success.
+    std::function<bool(float* celsius)> get_temperature_cb;
+
+    // After I2C scan: re-init PCA9685 drivers for detected addresses.
+    std::function<I2cScanFollowup(const std::vector<uint8_t>& detected)> i2c_after_scan_cb;
+
+    // After I2C apply: reload output mappings and re-init PCA9685 chips.
+    std::function<void(const std::vector<uint8_t>& applied)> i2c_config_applied_cb;
 
 };
 
@@ -88,6 +125,8 @@ std::string get_mqtt_json();
 // Scans I2C bus for PCA9685 devices, adds defaults to config if missing,
 // and removes any PCA9685 entries from config that are no longer present on bus.
 esp_err_t scan_and_prune_i2c(int i2c_port);
+// If Rack32 PCA mappings were wiped, restore standard 0x40/0x41/0x42 output layout.
+esp_err_t restore_rack32_pca_if_needed(int i2c_port);
 esp_mqtt_client_handle_t get_mqtt_client();
 void send_ws_message(const std::string& msg);
 

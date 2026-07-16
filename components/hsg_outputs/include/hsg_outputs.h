@@ -28,6 +28,17 @@ bool hsg_outputs_get_mapping(int output, uint8_t *addr, uint8_t *channel);
 
 void hsg_outputs_clear_all();
 
+typedef struct {
+    int ok;
+    int failed;
+} hsg_pca_init_stats_t;
+
+int hsg_outputs_get_mapped_count(void);
+
+/** Initialize PCA9685 chips at the given addresses (with retries). */
+esp_err_t hsg_outputs_init_chips(const uint8_t* addrs, size_t count, int retry_attempts,
+                                 hsg_pca_init_stats_t* stats_out);
+
 #ifdef __cplusplus
 }
 #endif

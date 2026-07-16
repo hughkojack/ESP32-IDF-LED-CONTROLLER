@@ -22,10 +22,9 @@ Hub: **LED-Controller** web UI + `POST /api/node/config`.
 | Data level | **3.3 V → 5 V level shifter** on GPIO 7 → strip DIN (required for reliable 24/7 operation) |
 | Decoupling | Capacitor at strip power recommended (100–1000 µF) |
 
-**GPIO 7 is reserved for the strip.** Do not assign it as:
+**GPIO 7 is reserved for the strip.** Do not assign it as a switch input (`CMD_SET_INPUT_CFG` gpio is rejected).
 
-- A switch input (`CMD_SET_INPUT_CFG` gpio is rejected)
-- CAN link indicator (`CMD_SET_CAN_LINK_INDICATOR`)
+**CAN link fault (automatic):** Hub sends `SENSOR_DATA (0x2)` keepalive every ~7 s. If the node sees no hub traffic for 30 s, **WS2812 pixel 0** flashes red (500 ms) regardless of night light; LEDs 1–11 are unchanged.
 
 **Find Me** uses the WS2812 strip via `CMD_FIND_ME` (all LEDs blink configured find-me color). `CMD_SET_FIND_ME_OUTPUT` is ignored on mechanical WS2812 nodes.
 
@@ -68,7 +67,7 @@ On the **Nodes** tab, each **mechanical** node has:
 
 | Control | Action |
 |---------|--------|
-| **Configure** | Node ID, inputs, CAN link GPIO, switch types (no find-me) |
+| **Configure** | Node ID, inputs, switch types (no find-me) |
 | **Strip lighting** | Modal: effect colors/speed, night light, click effect type, find-me |
 | **Reboot** / **Remove** | As before |
 

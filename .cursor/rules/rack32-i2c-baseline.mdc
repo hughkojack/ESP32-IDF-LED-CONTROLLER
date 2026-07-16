@@ -1,0 +1,33 @@
+---
+description: Rack32 I2C working baseline — do not regress PCA scan, probe, or bus recover behavior
+globs: components/hsg_api/**,components/hsg_outputs/**,components/ds3231/**,components/i2c_bus_lock/**,src/main.cpp
+alwaysApply: false
+---
+
+# Rack32 I2C working baseline (verified)
+
+Hardware: SDA=21, SCL=22. Three PCA9685 at **0x40, 0x41, 0x42** → outputs 1–48. DS3231 RTC at **0x68** (same bus).
+
+## Must keep working
+
+- I2C scan returns in <1s with `0x40, 0x41, 0x42`; UI shows "Configuration matches scan — no update needed" when unchanged.
+- PCA LED commands work after boot and after bus recover.
+- Apply only shown when `to_add` / `to_remove` non-empty.
+
+## I2C probe / recover rules
+
+- **Never** call `i2c_bus_recover()` on normal probe NACK (empty address). Recover only on `ESP_ERR_TIMEOUT`.
+- Rack32 PCA scan: probe **only 0x40, 0x41, 0x42** — not 0x43–0x47.
+- Scan is probe-only; no PCA re-init in `h_i2c_scan` handler (would block HTTP).
+- After `i2c_bus_recover()`, PCA device handles are stale — call `hsg_pca9685_invalidate_bus_devices()` via post-recover callback.
+- MCP9808 remains disabled on Rack32 (not installed).
+
+## DS3231 on Rack32
+
+- Use register read (`ds3231_probe` / `ds3231_transfer`), **not** `i2c_master_probe` at 0x68/0x69.
+- Boot: probe DS3231 before PCA init; bus recover + 3s delay before PCA9685 init.
+- Scan "other devices": report cached DS3231 address from boot probe — do not re-probe with `i2c_master_probe`.
+
+## Boot order (Rack32)
+
+Network → I2C init → TWDT reinit → DS3231 probe → bus recover → 3s PCA delay → `restore_rack32_pca_if_needed` → `hsg_outputs_init` → HTTP/MQTT.
