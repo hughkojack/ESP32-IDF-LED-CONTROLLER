@@ -16,6 +16,12 @@
 #define MCP9808_MANUF_ID       0x0054U
 #define MCP9808_DEVICE_ID      0x0400U
 
+/* Disabled on all boards until a sensor is installed and probe is re-enabled
+ * carefully. Config-page /api/adopt was probing Olimex and crashing the bus. */
+#ifndef MCP9808_ENABLE
+#define MCP9808_ENABLE 0
+#endif
+
 static bool s_installed = false;
 static bool s_probe_attempted = false;
 static uint8_t s_addr = 0;
@@ -34,7 +40,7 @@ bool mcp9808_is_installed(void)
 
 uint8_t mcp9808_get_addr(void)
 {
-    return s_addr;
+    return s_installed ? s_addr : 0;
 }
 
 static esp_err_t mcp9808_transfer(i2c_master_bus_handle_t bus, uint8_t addr,
@@ -64,10 +70,14 @@ static esp_err_t mcp9808_transfer(i2c_master_bus_handle_t bus, uint8_t addr,
     else
         ret = i2c_master_receive(dev, rbuf, rlen, xfer_timeout);
 
+    esp_err_t xfer = ret;
     ret = i2c_bus_remove_device_safe(bus, dev, ret);
+    const bool need_recover = i2c_bus_recover_pending() || (xfer == ESP_ERR_TIMEOUT);
     i2c_bus_unlock();
-    if (ret != ESP_OK)
+    if (need_recover) {
         i2c_bus_recover(bus);
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
     return ret;
 }
 
@@ -101,21 +111,20 @@ static bool mcp9808_try_address(i2c_master_bus_handle_t bus, uint8_t addr)
 
 bool mcp9808_probe(i2c_master_bus_handle_t bus)
 {
-#if defined(BOARD_RACK32)
+#if !MCP9808_ENABLE
     (void)bus;
     return false;
 #else
     if (!bus)
         return false;
-
-    /* Do not use i2c_master_probe here — false ACKs on a shared bus can wedge the driver. */
+    /* Do not use i2c_master_probe — false ACKs on a shared bus can wedge the driver. */
     return mcp9808_try_address(bus, MCP9808_I2C_ADDR_DEFAULT);
 #endif
 }
 
 bool mcp9808_ensure_ready(i2c_master_bus_handle_t bus)
 {
-#if defined(BOARD_RACK32)
+#if !MCP9808_ENABLE
     (void)bus;
     return false;
 #else
@@ -148,7 +157,7 @@ static float mcp9808_raw_to_celsius(uint16_t raw)
 
 esp_err_t mcp9808_read_celsius(i2c_master_bus_handle_t bus, float *out_celsius)
 {
-#if defined(BOARD_RACK32)
+#if !MCP9808_ENABLE
     (void)bus;
     (void)out_celsius;
     return ESP_ERR_NOT_SUPPORTED;

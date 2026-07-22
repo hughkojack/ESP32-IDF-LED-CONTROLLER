@@ -1613,8 +1613,9 @@ extern "C" void app_main(void) {
     /* Don't monitor IDLE during multi-second I2C init (but keep TWDT initialized). */
     reinit_task_wdt_no_idle();
 
+    /* Let I2C lines settle. Do not bus-reset immediately before probe — that
+     * races the ESP-IDF I2C ISR (StoreProhibited in i2c_ll_read_rxfifo). */
     vTaskDelay(pdMS_TO_TICKS(500));
-    i2c_bus_recover(i2c_bus_handle);
 
     const bool ds3231_present = ds3231_probe(i2c_bus_handle);
     ds3231_mark_installed(ds3231_present);
@@ -1657,9 +1658,12 @@ extern "C" void app_main(void) {
     } else
         ESP_LOGI(TAG, "DS3231 not found — RTC disabled (no I2C traffic to 0x68/0x69)");
 
-    esp_err_t bus_rr = i2c_bus_recover(i2c_bus_handle);
-    if (bus_rr != ESP_OK) {
-        ESP_LOGW(TAG, "I2C bus recover after RTC probe failed: %s", esp_err_to_name(bus_rr));
+    if (i2c_bus_recover_pending()) {
+        esp_err_t bus_rr = i2c_bus_recover(i2c_bus_handle);
+        if (bus_rr != ESP_OK) {
+            ESP_LOGW(TAG, "I2C bus recover after RTC probe failed: %s", esp_err_to_name(bus_rr));
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
 
     ESP_LOGI(TAG, "Waiting for PCA9685 boards to stabilize...");

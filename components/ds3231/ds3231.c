@@ -5,6 +5,7 @@
 #include "i2c_bus_lock.h"
 #include "driver/i2c_master.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <string.h>
 
 #define I2C_XFER_TIMEOUT_MS 100
@@ -79,29 +80,31 @@ static esp_err_t ds3231_transfer(i2c_master_bus_handle_t bus, uint8_t addr,
         ret = i2c_master_receive(dev, rbuf, rlen, xfer_timeout);
     }
     esp_err_t rm = i2c_bus_remove_device_safe(bus, dev, ret);
+    const bool need_recover = i2c_bus_recover_pending() || (ret == ESP_ERR_TIMEOUT);
     i2c_bus_unlock();
-    if (ret == ESP_ERR_TIMEOUT)
+    /* Only recover on timeout / stuck rm — not on every NACK (avoids ISR race). */
+    if (need_recover) {
         i2c_bus_recover(bus);
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
     return rm;
 }
 
 bool ds3231_probe(i2c_master_bus_handle_t bus)
 {
     uint8_t regs[7];
-    esp_err_t ret = ds3231_read_regs(bus, DS3231_I2C_ADDR, regs);
-    if (ret == ESP_OK) {
-        s_i2c_addr = DS3231_I2C_ADDR;
-        return true;
+    static const uint8_t k_addrs[] = { DS3231_I2C_ADDR, DS3231_I2C_ADDR_ALT };
+
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        for (size_t i = 0; i < sizeof(k_addrs); ++i) {
+            esp_err_t ret = ds3231_read_regs(bus, k_addrs[i], regs);
+            if (ret == ESP_OK) {
+                s_i2c_addr = k_addrs[i];
+                return true;
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
-    if (ret == ESP_ERR_TIMEOUT)
-        i2c_bus_recover(bus);
-    ret = ds3231_read_regs(bus, DS3231_I2C_ADDR_ALT, regs);
-    if (ret == ESP_OK) {
-        s_i2c_addr = DS3231_I2C_ADDR_ALT;
-        return true;
-    }
-    if (ret == ESP_ERR_TIMEOUT)
-        i2c_bus_recover(bus);
     return false;
 }
 

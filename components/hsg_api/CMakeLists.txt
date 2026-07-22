@@ -16,6 +16,7 @@ idf_component_register(
         i2c_bus_lock
         hsg_outputs
         ds3231
+        mcp9808
 )
 # Embed your HTML file as binary (path relative to this component)
 target_add_binary_data(${COMPONENT_TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/ESP32-POE.html" TEXT)

@@ -17,17 +17,22 @@ void i2c_bus_unlock(void);
 typedef void (*i2c_bus_post_recover_cb_t)(void);
 void i2c_bus_set_post_recover_cb(i2c_bus_post_recover_cb_t cb);
 
-/** Pulse SCL to release a stuck slave; caller must not hold the bus lock. */
+/**
+ * Bus reset + post-recover CB. Must NOT be called while holding the bus lock.
+ */
 esp_err_t i2c_bus_recover(i2c_master_bus_handle_t bus);
 
 /**
  * Remove a temporary I2C device after a transfer.
- * Resets the bus first if the transfer or removal fails (ESP-IDF requirement).
- * Caller must hold the bus lock.
+ * Caller must hold the bus lock. Never resets the bus or runs the post-recover CB.
+ * If rm_device fails, sets recover-pending only;
+ * caller must call i2c_bus_recover() after unlock when i2c_bus_recover_pending().
  */
 esp_err_t i2c_bus_remove_device_safe(i2c_master_bus_handle_t bus,
                                      i2c_master_dev_handle_t dev,
                                      esp_err_t xfer_err);
+
+bool i2c_bus_recover_pending(void);
 
 #ifdef __cplusplus
 }

@@ -4,6 +4,7 @@
 static const char* TAG = "i2c_bus";
 static SemaphoreHandle_t s_i2c_bus_mutex;
 static i2c_bus_post_recover_cb_t s_post_recover_cb;
+static bool s_recover_pending;
 
 static void i2c_bus_notify_recovered(void)
 {
@@ -44,7 +45,9 @@ esp_err_t i2c_bus_recover(i2c_master_bus_handle_t bus)
     if (!bus) {
         return ESP_ERR_INVALID_ARG;
     }
+    /* Must not hold the bus mutex — post-recover CB takes the lock. */
     esp_err_t ret = i2c_master_bus_reset(bus);
+    s_recover_pending = false;
     if (ret == ESP_OK) {
         i2c_bus_notify_recovered();
     }
@@ -55,27 +58,24 @@ esp_err_t i2c_bus_remove_device_safe(i2c_master_bus_handle_t bus,
                                      i2c_master_dev_handle_t dev,
                                      esp_err_t xfer_err)
 {
-    if (xfer_err != ESP_OK && bus) {
-        esp_err_t rr = i2c_master_bus_reset(bus);
-        if (rr != ESP_OK) {
-            ESP_LOGW(TAG, "bus reset after xfer error (%s) failed: %s",
-                     esp_err_to_name(xfer_err), esp_err_to_name(rr));
-        } else {
-            i2c_bus_notify_recovered();
-        }
-    }
+    /* Caller holds the bus lock. Never reset/notify here (ISR race + CB deadlock). */
+    (void)bus;
     if (!dev) {
         return xfer_err;
     }
+
     esp_err_t rm = i2c_master_bus_rm_device(dev);
-    if (rm != ESP_OK) {
-        ESP_LOGW(TAG, "rm_device failed (%s) after xfer %s; resetting bus",
-                 esp_err_to_name(rm), esp_err_to_name(xfer_err));
-        if (bus) {
-            i2c_master_bus_reset(bus);
-            i2c_bus_notify_recovered();
-        }
-        return (xfer_err != ESP_OK) ? xfer_err : rm;
+    if (rm == ESP_OK) {
+        return xfer_err;
     }
-    return xfer_err;
+
+    ESP_LOGW(TAG, "rm_device failed (%s) after xfer %s; defer recover until unlock",
+             esp_err_to_name(rm), esp_err_to_name(xfer_err));
+    s_recover_pending = true;
+    return (xfer_err != ESP_OK) ? xfer_err : rm;
+}
+
+bool i2c_bus_recover_pending(void)
+{
+    return s_recover_pending;
 }

@@ -50,18 +50,15 @@ static void recover_bus_on_error(esp_err_t err)
     if (err == ESP_OK || err == ESP_ERR_INVALID_ARG) {
         return;
     }
+    /* Drop handles under lock, then unlock before bus_reset so the
+     * post-recover callback can take the lock without deadlocking. */
     if (i2c_bus_lock(kI2cXferTimeout)) {
         drop_pca_device_cache_locked();
-        esp_err_t rr = i2c_bus_recover(i2c_bus_handle);
-        if (rr != ESP_OK) {
-            ESP_LOGW(TAG, "I2C bus recover failed: %s", esp_err_to_name(rr));
-        }
         i2c_bus_unlock();
-    } else {
-        esp_err_t rr = i2c_bus_recover(i2c_bus_handle);
-        if (rr != ESP_OK) {
-            ESP_LOGW(TAG, "I2C bus recover failed: %s", esp_err_to_name(rr));
-        }
+    }
+    esp_err_t rr = i2c_bus_recover(i2c_bus_handle);
+    if (rr != ESP_OK) {
+        ESP_LOGW(TAG, "I2C bus recover failed: %s", esp_err_to_name(rr));
     }
 }
 

@@ -2,9 +2,11 @@
 #define HARDWARE_CONFIG_H
 
 // --- Select your board ---
-// Uncomment the board you are compiling for
-#define BOARD_RACK32
-//#define BOARD_OLIMEX_POE
+// PlatformIO defines BOARD_RACK32 or BOARD_OLIMEX_POE for each environment.
+// Default to Olimex POE only for builds that do not select either board.
+#if !defined(BOARD_RACK32) && !defined(BOARD_OLIMEX_POE)
+#define BOARD_OLIMEX_POE
+#endif
 
 
 #if defined(BOARD_OLIMEX_POE)

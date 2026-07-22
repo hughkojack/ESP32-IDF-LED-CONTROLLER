@@ -29,6 +29,7 @@ extern "C" int hsg_outputs_get_mapped_count(void);
 #include "hardware_config.h"
 #include "can_protocol.h"
 #include "ds3231.h"
+#include "mcp9808.h"
 
 static const char* TAG = "HSG-API";
 static const char* NVS_NS = "cfg";
@@ -171,19 +172,13 @@ static std::vector<uint8_t> scan_rtc_addrs() {
     return found;
 }
 
-// Probe MCP9808 address range (0x18–0x1F) for scan "other devices" list
+// Report MCP9808 from cached probe only — do not i2c_master_probe 0x18–0x1F during scan.
 static std::vector<uint8_t> scan_mcp9808_addrs() {
     std::vector<uint8_t> found;
-#if defined(BOARD_RACK32)
-    (void)found;
+    uint8_t addr = mcp9808_get_addr();
+    if (addr != 0)
+        found.push_back(addr);
     return found;
-#else
-    for (uint8_t addr = 0x18; addr <= 0x1F; ++addr) {
-        if (i2c_probe(i2c_bus_handle, addr) == ESP_OK)
-            found.push_back(addr);
-    }
-    return found;
-#endif
 }
 
 static std::vector<uint8_t> get_configured_pca9685_addrs() {
