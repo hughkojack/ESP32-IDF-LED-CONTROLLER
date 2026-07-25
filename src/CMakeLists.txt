@@ -27,6 +27,7 @@ idf_component_register(
         cJSON
         freertos
         esp_event
+        hsg_panel
 )
 
 if(BOARD_OLIMEX_POE)

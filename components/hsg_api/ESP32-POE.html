@@ -599,9 +599,22 @@
             </div>
 
             <div id="advancedSection" class="config-section hidden space-y-8">
-                <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                <div id="globalSettingsSection" class="bg-gray-800 p-6 rounded-lg shadow-lg">
                     <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-white">Global Settings</h2>
                     <div class="space-y-4">
+                        <div>
+                            <label for="defaultBrightness" class="block text-sm font-medium text-gray-300">Default Brightness</label>
+                            <div class="mt-1 flex items-center gap-2">
+                                <div class="brightness-slider-wrap flex-1">
+                                    <div class="brightness-slider-track"></div>
+                                    <div class="brightness-slider-fill" id="defaultBrightnessFill" style="width: 50%;"></div>
+                                    <div class="brightness-slider-glow" id="defaultBrightnessGlow" style="width: 50%;"></div>
+                                    <input type="range" id="defaultBrightness" min="1" max="100" value="50" class="brightness-slider h-2 rounded-lg cursor-pointer">
+                                </div>
+                                <span id="defaultBrightnessValue" class="text-white font-mono w-10">50</span><span class="text-gray-400">%</span>
+                            </div>
+                            <p class="text-xs text-gray-400 mt-1">Used when a lighting command does not define a brightness value.</p>
+                        </div>
                         <div>
                             <label for="groupStaggerMs" class="block text-sm font-medium text-gray-300">Group Stagger Delay (ms)</label>
                             <input type="number" id="groupStaggerMs" placeholder="e.g., 150" class="mt-1 w-full bg-gray-700 text-white rounded-md px-4 py-2 border border-gray-600">
@@ -689,6 +702,8 @@
             const mqttClientId = document.getElementById('mqttClientId');
             const mqttUsername = document.getElementById('mqttUsername');
             const mqttPassword = document.getElementById('mqttPassword');
+            const defaultBrightness = document.getElementById('defaultBrightness');
+            const defaultBrightnessValue = document.getElementById('defaultBrightnessValue');
             const commandTargetSelect = document.getElementById('commandTargetSelect');
             const commandStateSelect = document.getElementById('commandStateSelect');
             const commandUseBrightness = document.getElementById('commandUseBrightness');
@@ -797,6 +812,10 @@
             refreshButton.addEventListener('click', refreshCanHistory);
 
             uploadFwBtn.addEventListener('click', uploadFirmware);
+            defaultBrightness.addEventListener('input', () => {
+                defaultBrightnessValue.textContent = defaultBrightness.value;
+                updateBrightnessSliderFill(defaultBrightness);
+            });
             scanI2cButton.addEventListener('click', scanI2cDevices);
             applyI2cButton.addEventListener('click', applyI2cScanResults);
             restartBtn.addEventListener('click', restartDevice);
@@ -910,6 +929,7 @@
                     populateUI({ ...adoptData, config: configData });
 
                     // Add save buttons to the relevant sections
+                    document.getElementById('globalSettingsSection').insertAdjacentHTML('beforeend', saveButtonTemplate);
                     document.getElementById('i2cMappingSection').insertAdjacentHTML('beforeend', saveButtonTemplate);
                     document.getElementById('groupConfigSection').insertAdjacentHTML('beforeend', saveButtonTemplate);
                     document.getElementById('bindingsSection').insertAdjacentHTML('beforeend', saveButtonTemplate);
@@ -1023,6 +1043,10 @@
                 
                 const settings = data.config?.settings || {};
                 document.getElementById('groupStaggerMs').value = settings.groupStaggerMs || 0;
+                const savedDefaultBrightness = Math.min(100, Math.max(1, Number(settings.defaultBrightness) || 50));
+                defaultBrightness.value = savedDefaultBrightness;
+                defaultBrightnessValue.textContent = savedDefaultBrightness;
+                updateBrightnessSliderFill(defaultBrightness);
 
                 // --- CORRECTED I2C MAPPING LOGIC ---
                 i2cMapping.innerHTML = ''; // Clear the section first
@@ -2215,6 +2239,7 @@
                 }
                 const configToSave = {
                     settings: {
+                        defaultBrightness: Math.min(100, Math.max(1, parseInt(defaultBrightness.value, 10) || 50)),
                         groupStaggerMs: parseInt(document.getElementById('groupStaggerMs').value, 10) || 0,
                     },
                     wifi: {

@@ -1,0 +1,16 @@
+idf_component_register(
+    SRCS
+        "hsg_panel.cpp"
+        "panel_hw.cpp"
+        "panel_encoder.cpp"
+        "panel_draw.cpp"
+    INCLUDE_DIRS
+        "include"
+        "."
+        "../../src"
+    REQUIRES
+        driver
+        esp_lcd
+        esp_timer
+        freertos
+)

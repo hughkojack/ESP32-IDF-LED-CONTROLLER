@@ -622,7 +622,7 @@ static esp_err_t h_command(httpd_req_t* req) {
     const cJSON *state_json = cJSON_GetObjectItem(cmd, "state");
     const char* state_str = cJSON_IsString(state_json) ? state_json->valuestring : nullptr;
     
-    int brightness = 0; // Default to 0
+    int brightness = -1; // -1 means the command did not specify brightness
     const cJSON *brightness_json = cJSON_GetObjectItem(cmd, "brightness");
     if (cJSON_IsNumber(brightness_json)) {
         brightness = brightness_json->valueint;
@@ -1390,7 +1390,7 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
                 // --- Check if it's an OUTPUT command ---
                 if (cJSON_IsNumber(output_json)) {
                     int output_num = output_json->valueint;
-                    int brightness = 0;
+                    int brightness = -1; // omitted → use global default in processCommand
                     int fade_ms = 0;
 
                     const cJSON *brightness_json = cJSON_GetObjectItem(json, "brightness");
@@ -1399,7 +1399,6 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
                     const char* state_str = cJSON_IsString(state_json) ? state_json->valuestring : nullptr;
 
                     if (cJSON_IsNumber(brightness_json)) brightness = brightness_json->valueint;
-                    //else if (cJSON_IsString(state_json) && strcmp(state_json->valuestring, "ON") == 0) brightness = 100;
                     
                     if (cJSON_IsNumber(fade_json)) fade_ms = fade_json->valueint;
                     
@@ -1407,9 +1406,8 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
                         g_init.output_cb(output_num, brightness, fade_ms, state_str);
                     }
                 } 
-                // --- FIX: Add this block to handle GROUP commands ---
                 else if (cJSON_IsString(group_json)) {
-                    int brightness = 50; // Default to ON (50%)
+                    int brightness = -1; // omitted → use global default in processCommand
                     int fade_ms = 0;
 
                     const cJSON *brightness_json = cJSON_GetObjectItem(json, "brightness");
@@ -1419,8 +1417,6 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
 
                     if (cJSON_IsNumber(brightness_json)) {
                         brightness = brightness_json->valueint;
-//                    } else if (cJSON_IsString(state_json) && strcmp(state_json->valuestring, "OFF") == 0) {
-//                        brightness = 0;
                     }
 
                     if (cJSON_IsNumber(fade_json)) {

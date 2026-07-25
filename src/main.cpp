@@ -48,6 +48,7 @@ extern "C" {
 #include "hsg_pca9685.h"
 #include "ds3231.h"
 #include "mcp9808.h"
+#include "hsg_panel.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include <ctime>
@@ -93,7 +94,7 @@ struct Command {
     TargetType type;
     int output_id = 0;
     std::string group_name;
-    int brightness = 0;
+    int brightness = -1; // -1 indicates not specified
     int fade_ms = 0;
     std::string state;
 };
@@ -241,6 +242,7 @@ OutputState outputs[MAX_OUTPUTS];
 
 //------------------------------------------------------------------------
 int outputBrightness[MAX_OUTPUTS] = {0}; // Last "ON" brightness (0-100)
+static int g_default_brightness = 50;    // Used when a command omits brightness
 static can_frame g_last_frame = {};
 static SemaphoreHandle_t g_bindings_mutex;
 
@@ -482,14 +484,18 @@ static HSG::API::CommandFeedback processCommand(const Command& cmd) {
         }
 
         if (should_turn_on) {
-            final_brightness = (cmd.brightness > 0) ? cmd.brightness : 50;
+            if (cmd.brightness >= 0) {
+                final_brightness = cmd.brightness;
+            } else {
+                final_brightness = g_default_brightness;
+            }
         } else {
             final_brightness = 0;
         }
     } else if (cmd.state == "ON") {
-        final_brightness = (cmd.brightness > 0) ? cmd.brightness : 50;
+        final_brightness = (cmd.brightness >= 0) ? cmd.brightness : g_default_brightness;
     } else if (cmd.state.empty()) {
-        final_brightness = cmd.brightness;
+        final_brightness = (cmd.brightness >= 0) ? cmd.brightness : g_default_brightness;
     } else {
         final_brightness = 0;
     }
@@ -1051,6 +1057,16 @@ void reload_bindings() {
         // --- END DIAGNOSTIC BLOCK ---
     */
 
+        cJSON* settings_json = cJSON_GetObjectItem(config, "settings");
+        cJSON* default_brightness_json = settings_json
+            ? cJSON_GetObjectItem(settings_json, "defaultBrightness")
+            : nullptr;
+        g_default_brightness = cJSON_IsNumber(default_brightness_json)
+            ? default_brightness_json->valueint
+            : 50;
+        if (g_default_brightness < 1) g_default_brightness = 1;
+        if (g_default_brightness > 100) g_default_brightness = 100;
+
         cJSON* bindings_json = cJSON_GetObjectItem(config, "bindings");
         if (cJSON_IsArray(bindings_json)) {
             cJSON* rule_json = NULL;
@@ -1084,7 +1100,8 @@ void reload_bindings() {
         }
 
         cJSON_Delete(config);
-        ESP_LOGI(TAG, "Loaded %d CAN bindings", g_bindings.size());
+        ESP_LOGI(TAG, "Loaded %d CAN bindings; default brightness=%d%%",
+                 g_bindings.size(), g_default_brightness);
         xSemaphoreGive(g_bindings_mutex);
     }
 }
@@ -1707,6 +1724,75 @@ extern "C" void app_main(void) {
 
     // Load nodes from config
     load_nodes_from_config();
+
+#if defined(BOARD_OLIMEX_POE)
+    {
+        hsg_panel_callbacks_t panel_cb = {};
+        panel_cb.fw_short_name =
+#ifdef FW_SHORT_NAME
+            FW_SHORT_NAME;
+#else
+            "HSG LED Controller";
+#endif
+        panel_cb.toggle_output = [](int output_id) -> bool {
+            if (output_id < 1 || output_id > MAX_OUTPUTS) return false;
+            /* Omit brightness so processCommand uses the global default. */
+            Command cmd = {TargetType::OUTPUT, output_id, "", -1, 0, "TOGGLE"};
+            auto fb = processCommand(cmd);
+            return fb.ok;
+        };
+        panel_cb.list_outputs = [](hsg_panel_output_info_t *out, int max_count) -> int {
+            if (!out || max_count <= 0) return 0;
+            int n = 0;
+            for (int id = 1; id <= MAX_OUTPUTS && n < max_count; ++id) {
+                uint8_t addr = 0, ch = 0;
+                if (!hsg_outputs_get_mapping(id, &addr, &ch)) continue;
+                out[n].id = id;
+                out[n].on = outputs[id - 1].targetPwmValue > 0;
+                int bri = outputBrightness[id - 1];
+                if (bri <= 0 && out[n].on) {
+                    bri = (int)(outputs[id - 1].targetPwmValue * 100 / 4095);
+                }
+                out[n].brightness = bri;
+                ++n;
+            }
+            return n;
+        };
+        panel_cb.list_nodes = [](hsg_panel_node_info_t *out, int max_count) -> int {
+            if (!out || max_count <= 0 || !g_nodes_mutex) return 0;
+            int n = 0;
+            if (xSemaphoreTake(g_nodes_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return 0;
+            int64_t now = esp_timer_get_time();
+            for (const auto &pair : g_nodes) {
+                if (n >= max_count) break;
+                out[n].node_id = pair.second.node_id;
+                out[n].node_type = pair.second.node_type;
+                out[n].last_seen_us = pair.second.last_seen_timestamp_us;
+                out[n].online = (pair.second.last_seen_timestamp_us > 0) &&
+                                ((now - pair.second.last_seen_timestamp_us) < 30000000LL);
+                ++n;
+            }
+            xSemaphoreGive(g_nodes_mutex);
+            return n;
+        };
+        panel_cb.get_network = [](char *ip, size_t ip_len, bool *link_up) {
+            if (ip && ip_len) {
+                ip[0] = '\0';
+                strncpy(ip, "-", ip_len - 1);
+                ip[ip_len - 1] = '\0';
+            }
+            if (link_up) *link_up = false;
+            esp_netif_t *netif = esp_netif_get_default_netif();
+            if (!netif) return;
+            esp_netif_ip_info_t info = {};
+            if (esp_netif_get_ip_info(netif, &info) == ESP_OK && ip && ip_len > 0) {
+                snprintf(ip, ip_len, IPSTR, IP2STR(&info.ip));
+                if (link_up) *link_up = (info.ip.addr != 0);
+            }
+        };
+        hsg_panel_start(&panel_cb);
+    }
+#endif
 
     ESP_LOGI(TAG, "app_main() Initialization complete.");
 

@@ -23,6 +23,22 @@
     #define CAN_CLK_GPIO   4
     #define CAN_INT_GPIO   35
     #define CAN_CS_GPIO    5
+
+    // Commissioning panel: 7-pin ST7789 SPI (silk SCL/SDA = clock/MOSI, no CS)
+    // Separate from CAN SPI3 — uses SPI2 on UEXT pins.
+    #define PANEL_SPI_HOST     SPI2_HOST
+    #define PANEL_TFT_SCLK_GPIO 14
+    #define PANEL_TFT_MOSI_GPIO 2
+    #define PANEL_TFT_CS_GPIO  (-1)
+    #define PANEL_TFT_DC_GPIO  0
+    #define PANEL_TFT_RST_GPIO 15
+    #define PANEL_TFT_BL_GPIO  (-1)  // tie BLK to 3.3V
+    // 320x240 landscape (ST7789 GRAM is 240x320; driver uses swap_xy).
+    #define PANEL_TFT_X_GAP    0
+    #define PANEL_TFT_Y_GAP    0
+    #define PANEL_ENC_A_GPIO   34
+    #define PANEL_ENC_B_GPIO   36
+    #define PANEL_ENC_SW_GPIO  39
 #elif defined(BOARD_RACK32)
     // --- Rack32 GPIOs ---
     #define W5500_HOST        SPI2_HOST

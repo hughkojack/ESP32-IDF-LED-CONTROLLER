@@ -88,15 +88,18 @@ Endpoint	Method	Description
 ```
 ESP32-IDF-LED-CONTROLLER/
 ├── components/
-│   ├── hsg_api/          # API + web server logic
-│   ├── mcp2515/          # CAN bus driver  
+│   ├── hsg_api/          # API + embedded web UI
+│   ├── hsg_panel/        # Olimex LCD + encoder commissioning UI
+│   ├── hsg_outputs/      # PCA9685 mapping / PWM
+│   ├── esp32-mcp2515/    # CAN bus driver
 │   └── cJSON/            # JSON support
+├── docs/                 # Protocol and feature docs
 ├── src/
 │   ├── main.cpp          # Main application logic
-│   └── ESP32-POE.html    # Web interface (embedded in firmware)
-├── README.md             # Project documentation
-├── CMakeLists.txt        # Build configuration
-└── sdkconfig             # ESP-IDF project config
+│   └── hardware_config.h # Board pin maps (incl. panel)
+├── README.md
+├── CMakeLists.txt
+└── platformio.ini
 ```
 
 ### Notes
@@ -117,7 +120,27 @@ The main interface, accessed by navigating to the device's IP address, is used f
 - Group Definitions
 - CAN Switch Bindings
 - Network & MQTT Settings
+- Advanced → **Global Settings** (default brightness, group stagger)
 - Advanced actions like OTA updates and restarts.
+
+#### Global Settings
+
+Under **Advanced → Global Settings**:
+
+| Setting | Config key | Description |
+|---------|------------|-------------|
+| Default Brightness | `config.settings.defaultBrightness` | 1–100% (default **50**). Used when a lighting command does not specify brightness. |
+| Group Stagger Delay | `config.settings.groupStaggerMs` | Delay between channels when a group has stagger enabled. |
+
+Brightness resolution for `ON` / `TOGGLE` (when turning on):
+
+1. Explicit `brightness` in the command / binding / MQTT JSON wins.
+2. Otherwise the hub uses `settings.defaultBrightness`.
+3. `OFF` / toggle-off always forces 0.
+
+The Olimex local LCD panel toggle also uses the global default (it does not restore the last per-channel level).
+
+See [docs/CONFIG_AND_BRIGHTNESS.md](docs/CONFIG_AND_BRIGHTNESS.md).
 
 ### Real-Time Control Interface (`/control`)
 
@@ -140,6 +163,16 @@ Key Features:
 - Individual Control: Inside each group, every light has its own power toggle icon, a descriptive label, and a "glowing track" slider for fine-grained brightness control (0-100%).
 
 This implementation creates a seamless and intuitive user experience, ensuring the web interface is always a perfect, real-time mirror of the lighting system's actual state.
+
+### Local Commissioning Panel (Olimex ESP32-POE)
+
+On **Olimex ESP32-POE** builds, an optional ST7789 LCD + EC11 encoder panel (`components/hsg_panel`) provides on-device commissioning:
+
+- Browse mapped PCA outputs and toggle channels (uses **Default Brightness** when turning on)
+- Live refresh of output on/off state while the Outputs page is open
+- View network status and discovered CAN nodes
+
+Pins and SPI host are defined in `src/hardware_config.h` (`PANEL_*`). See [docs/COMMISSIONING_PANEL.md](docs/COMMISSIONING_PANEL.md).
 
 ## 📡 CAN Protocol
 
